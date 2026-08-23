@@ -1,0 +1,10 @@
+[
+  {"code": "WELCOME10", "discount_pct": 10.0, "max_discount": 10000, "min_cart_value": 50000, "active": true, "description": "Welcome discount: 10% off, max Rs.100, min cart Rs.500"},
+  {"code": "COFFEE20", "discount_pct": 20.0, "max_discount": 20000, "min_cart_value": 80000, "active": true, "description": "Coffee lovers: 20% off, max Rs.200, min cart Rs.800"},
+  {"code": "BUNDLE15", "discount_pct": 15.0, "max_discount": 30000, "min_cart_value": 150000, "active": true, "description": "Bundle deal: 15% off, max Rs.300, on orders above Rs.1500"},
+  {"code": "FIRSTBUY", "discount_pct": 12.0, "max_discount": 15000, "min_cart_value": 60000, "active": true, "description": "First purchase: 12% off, max Rs.150, min cart Rs.600"},
+  {"code": "SUMMER25", "discount_pct": 25.0, "max_discount": 25000, "min_cart_value": 100000, "active": true, "description": "Summer sale: 25% off, max Rs.250, min cart Rs.1000"},
+  {"code": "EXPIRED01", "discount_pct": 50.0, "max_discount": 50000, "min_cart_value": 10000, "active": false, "description": "EXPIRED: This coupon is no longer active (test case)"},
+  {"code": "MAXED100", "discount_pct": 100.0, "max_discount": 100000, "min_cart_value": 10000, "active": true, "description": "100% off (should be bounded by max_discount_pct safety limit)"},
+  {"code": "LOYALTY5", "discount_pct": 5.0, "max_discount": 5000, "min_cart_value": 30000, "active": true, "description": "Loyalty reward: 5% off, max Rs.50, min cart Rs.300"}
+]

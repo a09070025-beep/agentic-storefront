@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "agentic-storefront": {
+      "command": "py",
+      "args": [
+        "main.py",
+        "server"
+      ],
+      "cwd": "c:\\Users\\Ayush Rai\\.gemini\\antigravity\\scratch\\razorpay-buildathon\\agentic-storefront"
+    }
+  }
+}

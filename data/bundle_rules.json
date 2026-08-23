@@ -1,0 +1,122 @@
+[
+  {
+    "id": "bundle_001",
+    "name": "Coffee + Filters Combo",
+    "trigger_products": ["prod_001", "prod_002", "prod_003", "prod_004", "prod_005", "prod_006", "prod_007", "prod_008", "prod_009", "prod_010", "prod_011", "prod_012"],
+    "recommend_products": ["prod_040", "prod_046"],
+    "bundle_discount_pct": 5.0,
+    "reason": "Most coffee lovers need filters — save 5% when you add them"
+  },
+  {
+    "id": "bundle_002",
+    "name": "Beans + Grinder Essential",
+    "trigger_products": ["prod_001", "prod_002", "prod_003", "prod_004", "prod_005", "prod_006", "prod_007", "prod_008", "prod_009", "prod_010", "prod_011", "prod_012"],
+    "recommend_products": ["prod_041"],
+    "bundle_discount_pct": 8.0,
+    "reason": "Freshly ground beans taste 3x better — save 8% on a grinder"
+  },
+  {
+    "id": "bundle_003",
+    "name": "V60 Pour Over Setup",
+    "trigger_products": ["prod_020"],
+    "recommend_products": ["prod_040", "prod_042", "prod_028"],
+    "bundle_discount_pct": 7.0,
+    "reason": "Complete your V60 setup — filters + scale + kettle at 7% off"
+  },
+  {
+    "id": "bundle_004",
+    "name": "French Press Morning Kit",
+    "trigger_products": ["prod_021"],
+    "recommend_products": ["prod_003", "prod_060"],
+    "bundle_discount_pct": 6.0,
+    "reason": "Perfect French press morning — Brazilian Santos + classic mug at 6% off"
+  },
+  {
+    "id": "bundle_005",
+    "name": "AeroPress Travel Pack",
+    "trigger_products": ["prod_022"],
+    "recommend_products": ["prod_049", "prod_062", "prod_041"],
+    "bundle_discount_pct": 10.0,
+    "reason": "AeroPress on the go — filters + tumbler + grinder at 10% off"
+  },
+  {
+    "id": "bundle_006",
+    "name": "Espresso Experience",
+    "trigger_products": ["prod_023", "prod_009"],
+    "recommend_products": ["prod_063", "prod_047"],
+    "bundle_discount_pct": 8.0,
+    "reason": "Espresso essentials — cups + knock box at 8% off"
+  },
+  {
+    "id": "bundle_007",
+    "name": "Cold Brew Summer",
+    "trigger_products": ["prod_024"],
+    "recommend_products": ["prod_003", "prod_069", "prod_065"],
+    "bundle_discount_pct": 7.0,
+    "reason": "Cold brew summer setup — beans + bottle + camp mug at 7% off"
+  },
+  {
+    "id": "bundle_008",
+    "name": "Precision Brewing Upgrade",
+    "trigger_products": ["prod_042"],
+    "recommend_products": ["prod_045", "prod_028"],
+    "bundle_discount_pct": 6.0,
+    "reason": "Precision matters — thermometer + kettle complete your setup at 6% off"
+  },
+  {
+    "id": "bundle_009",
+    "name": "Chemex Elegance Package",
+    "trigger_products": ["prod_025"],
+    "recommend_products": ["prod_046", "prod_006", "prod_061"],
+    "bundle_discount_pct": 8.0,
+    "reason": "Chemex deserves premium — Kenya AA + filters + glass cups at 8% off"
+  },
+  {
+    "id": "bundle_010",
+    "name": "Latte Art Starter",
+    "trigger_products": ["prod_064"],
+    "recommend_products": ["prod_044", "prod_009"],
+    "bundle_discount_pct": 5.0,
+    "reason": "Start your latte art journey — frother + espresso blend at 5% off"
+  },
+  {
+    "id": "bundle_011",
+    "name": "Home Office Coffee Station",
+    "trigger_products": ["prod_029"],
+    "recommend_products": ["prod_012", "prod_043", "prod_060"],
+    "bundle_discount_pct": 10.0,
+    "reason": "Complete office setup — House Blend + canister + mug at 10% off"
+  },
+  {
+    "id": "bundle_012",
+    "name": "Storage + Freshness",
+    "trigger_products": ["prod_043"],
+    "recommend_products": ["prod_042"],
+    "bundle_discount_pct": 5.0,
+    "reason": "Keep beans fresh and measure precisely — scale + canister at 5% off"
+  },
+  {
+    "id": "bundle_013",
+    "name": "Category Bulk — Buy 3+ Coffee Beans",
+    "trigger_products": ["prod_001", "prod_002", "prod_003", "prod_004", "prod_005", "prod_006", "prod_007", "prod_008", "prod_009", "prod_010", "prod_011", "prod_012"],
+    "recommend_products": [],
+    "bundle_discount_pct": 10.0,
+    "reason": "Variety is the spice of life — 10% off when you buy 3 or more coffee varieties"
+  },
+  {
+    "id": "bundle_014",
+    "name": "Siphon + Premium Beans",
+    "trigger_products": ["prod_027"],
+    "recommend_products": ["prod_001", "prod_006"],
+    "bundle_discount_pct": 8.0,
+    "reason": "Siphon brewing shines with single-origins — Ethiopian + Kenyan at 8% off"
+  },
+  {
+    "id": "bundle_015",
+    "name": "Turkish Coffee Set",
+    "trigger_products": ["prod_026"],
+    "recommend_products": ["prod_010", "prod_063"],
+    "bundle_discount_pct": 7.0,
+    "reason": "Traditional Turkish setup — Indian Malabar + espresso cups at 7% off"
+  }
+]
