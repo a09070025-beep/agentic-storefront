@@ -235,6 +235,113 @@ def test_paymentgate_rollback():
     except RuntimeError:
         pass 
 
+# [11] Idempotency State Machine
+print("\n[11] Idempotency State Machine")
+
+@test("claim() on PENDING (non-expired) key returns rejection, no second Razorpay call")
+def test_idem_pending_rejection():
+    from agentic_storefront_guardrails.audit_log import AuditLog
+    import tempfile, os
+    db = os.path.join(tempfile.gettempdir(), "test_idem_pending.sqlite3")
+    if os.path.exists(db):
+        os.remove(db)
+    audit = AuditLog(db_path=db)
+    
+    # First claim succeeds
+    r1 = audit.claim_idempotency_key("test-pending-key", ttl_seconds=300)
+    assert r1['success'] == True, f"First claim should succeed: {r1}"
+    assert r1['status'] == 'PENDING'
+    
+    # Second claim on same key while PENDING must fail with status=PENDING
+    r2 = audit.claim_idempotency_key("test-pending-key", ttl_seconds=300)
+    assert r2['success'] == False, f"Second claim should fail: {r2}"
+    assert r2['status'] == 'PENDING', f"Expected PENDING, got {r2['status']}"
+    
+    os.remove(db)
+
+@test("claim() on FAILED key reclaims it — buyer can retry same cart after guardrail block")
+def test_idem_failed_reclaim():
+    from agentic_storefront_guardrails.audit_log import AuditLog
+    import tempfile, os
+    db = os.path.join(tempfile.gettempdir(), "test_idem_failed.sqlite3")
+    if os.path.exists(db):
+        os.remove(db)
+    audit = AuditLog(db_path=db)
+    
+    # Claim, then mark FAILED (simulating a guardrail block)
+    r1 = audit.claim_idempotency_key("test-failed-key", ttl_seconds=300)
+    assert r1['success'] == True
+    audit.commit_idempotency_key("test-failed-key", failed=True)
+    
+    # Second claim on the FAILED key must succeed (reclaim)
+    r2 = audit.claim_idempotency_key("test-failed-key", ttl_seconds=300)
+    assert r2['success'] == True, f"Reclaim of FAILED key should succeed: {r2}"
+    assert r2['status'] == 'PENDING', f"Reclaimed key should be PENDING: {r2['status']}"
+    
+    os.remove(db)
+
+@test("Expired PENDING key triggers NEEDS_RECONCILIATION on next claim()")
+def test_idem_ttl_expiry():
+    from agentic_storefront_guardrails.audit_log import AuditLog
+    import tempfile, os
+    db = os.path.join(tempfile.gettempdir(), "test_idem_ttl.sqlite3")
+    if os.path.exists(db):
+        os.remove(db)
+    audit = AuditLog(db_path=db)
+    
+    # Claim with TTL=0 so it expires immediately
+    r1 = audit.claim_idempotency_key("test-ttl-key", ttl_seconds=0)
+    assert r1['success'] == True
+    
+    import time
+    time.sleep(0.05)  # Ensure expiry
+    
+    # Next claim should flag NEEDS_RECONCILIATION
+    r2 = audit.claim_idempotency_key("test-ttl-key")
+    assert r2['success'] == False, f"Expired key claim should fail: {r2}"
+    assert r2['status'] == 'NEEDS_RECONCILIATION', f"Expected NEEDS_RECONCILIATION, got {r2['status']}"
+    
+    # Third claim on NEEDS_RECONCILIATION should be read-only (no duplicate audit writes)
+    r3 = audit.claim_idempotency_key("test-ttl-key")
+    assert r3['success'] == False
+    assert r3['status'] == 'NEEDS_RECONCILIATION', f"Should still be NEEDS_RECONCILIATION, got {r3['status']}"
+    
+    os.remove(db)
+
+@test("Expired PENDING key causes PaymentGate to return needs_reconciliation=True")
+def test_idem_ttl_paymentgate():
+    from agentic_storefront_guardrails.audit_log import AuditLog
+    from agentic_storefront_guardrails.guardrails import PriceGuard, ProductCatalog
+    from agentic_storefront_guardrails.inventory_lock import InventoryManager
+    from agentic_storefront_guardrails.payment_gate import PaymentGate
+    from agentic_storefront_guardrails.schemas import CheckoutItem
+    import tempfile, os, time
+    
+    db = os.path.join(tempfile.gettempdir(), "test_idem_gate.sqlite3")
+    if os.path.exists(db):
+        os.remove(db)
+    audit = AuditLog(db_path=db)
+    catalog = ProductCatalog()
+    pg = PriceGuard(catalog)
+    inv = InventoryManager()
+    
+    def dummy_create(items, amount, customer=None):
+        return "https://rzp.io/l/dummy"
+    
+    gate = PaymentGate(price_guard=pg, inventory=inv, audit=audit, razorpay_create_link_fn=dummy_create)
+    
+    # Pre-claim with TTL=0 to simulate a stuck PENDING
+    audit.claim_idempotency_key("ttl-gate-key", ttl_seconds=0)
+    time.sleep(0.05)
+    
+    items = [CheckoutItem(sku="prod_080", agreed_price=7000.0, quantity=1)]
+    result = gate.finalize_deal("test-ttl-gate", items, "ttl-gate-key")
+    assert result.success == False, f"Should have failed: {result}"
+    assert result.needs_reconciliation == True, f"Expected needs_reconciliation=True: {result}"
+    
+    os.remove(db)
+
+
 print("\n" + "="*60)
 print(f"RESULTS: {len(passes)} passed, {len(errors)} failed")
 print("="*60)

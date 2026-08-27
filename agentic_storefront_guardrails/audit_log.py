@@ -159,15 +159,40 @@ class AuditLog:
             )
 
     def claim_idempotency_key(self, key: str, ttl_seconds: int = 60) -> dict:
+        """
+        Two-phase idempotency claim. Status state machine:
+        
+          PENDING -> COMPLETED | FAILED | NEEDS_RECONCILIATION (on TTL expiry)
+          NEEDS_RECONCILIATION -> RECONCILED_COMPLETED | RECONCILED_FAILED (ops resolution)
+        
+        Reclaimable states (buyer can retry same cart):
+          FAILED              - guardrail blocked the deal, normal business outcome
+          RECONCILED_FAILED   - ops confirmed the payment truly failed
+        
+        Non-reclaimable states:
+          PENDING             - another request is in-flight
+          COMPLETED           - payment link already created, return it
+          RECONCILED_COMPLETED - ops confirmed the payment succeeded
+          NEEDS_RECONCILIATION - stuck, waiting for ops
+        """
         now = time.time()
         with self._conn() as conn:
             row = conn.execute("SELECT status, payment_link, expires_at FROM idempotency_keys WHERE id=?", (key,)).fetchone()
             if row:
                 status, link, expires_at = row
+                
+                # Expired PENDING -> flag for ops reconciliation (idempotent: only writes once)
                 if status == 'PENDING' and now > expires_at:
                     conn.execute("UPDATE idempotency_keys SET status='NEEDS_RECONCILIATION' WHERE id=?", (key,))
                     return {'success': False, 'status': 'NEEDS_RECONCILIATION', 'payment_link': None, 'reason': 'Expired pending claim flagged for reconciliation'}
-                return {'success': False, 'status': status, 'payment_link': link, 'reason': 'Key already exists'}
+                
+                # FAILED or RECONCILED_FAILED: safe to reclaim — delete old row, fall through to fresh insert
+                if status in ('FAILED', 'RECONCILED_FAILED'):
+                    conn.execute("DELETE FROM idempotency_keys WHERE id=?", (key,))
+                    # Fall through to fresh insert below
+                else:
+                    # PENDING (non-expired), COMPLETED, RECONCILED_COMPLETED, NEEDS_RECONCILIATION
+                    return {'success': False, 'status': status, 'payment_link': link, 'reason': 'Key already exists'}
             
             conn.execute("INSERT INTO idempotency_keys (id, status, payment_link, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
                          (key, 'PENDING', None, now, now + ttl_seconds))
