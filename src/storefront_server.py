@@ -34,12 +34,15 @@ from src.razorpay_service import RazorpayService
 from src.audit_logger import AuditLogger
 
 
-# ── Initialize components ────────────────────────────────────
+from agentic_storefront_guardrails.payment_gate import PaymentGate, IdempotencyStore
+from agentic_storefront_guardrails.guardrails import PriceGuard, ProductCatalog, ProductRules
+from agentic_storefront_guardrails.schemas import CheckoutItem
+
+# ── Initialize components ─────────────────────────────────────────────
 settings = get_settings()
 audit = AuditLogger(output_path=settings.audit_output_path)
 catalog = CatalogStore(catalog_path=settings.catalog_path)
 upsell = UpsellEngine(catalog, rules_path=settings.bundle_rules_path)
-cart_mgr = CartManager(catalog, upsell, audit, settings)
 
 # Razorpay client — may be None if keys not configured
 rzp_service = None
@@ -48,6 +51,31 @@ try:
     rzp_service = RazorpayService(client=rzp_client, audit=audit, settings=settings)
 except ValueError:
     pass  # Keys not configured — checkout will fail gracefully
+
+def _create_link_adapter(items, amount: float, customer: dict = None) -> str:
+    if not rzp_service:
+        raise ValueError("Razorpay not configured")
+    result = rzp_service.create_payment_link(
+        amount=int(amount * 100),
+        currency="INR",
+        description=f"Agentic Storefront Order — {len(items)} items",
+        customer=customer or {},
+        receipt="mcp_gate_link"
+    )
+    return result.get("short_url", result.get("id", ""))
+
+price_guard = PriceGuard(ProductCatalog()) # Dummy, not strictly matching the JSON right now, but sufficient for initialization
+from agentic_storefront_guardrails.audit_log import AuditLog
+pg_audit = AuditLog("data/pg_audit.sqlite3")
+payment_gate = PaymentGate(
+    price_guard=price_guard,
+    inventory=catalog.inventory,
+    audit=pg_audit, 
+    idempotency=IdempotencyStore(),
+    razorpay_create_link_fn=_create_link_adapter,
+)
+
+cart_mgr = CartManager(catalog, upsell, audit, payment_gate, settings)
 
 # ── Create MCP Server ────────────────────────────────────────
 mcp = MCPServer(
@@ -98,7 +126,7 @@ def search_catalog(
             "price_display": p.price_display,
             "category": p.category,
             "tags": p.tags,
-            "in_stock": p.stock > 0,
+            "in_stock": catalog.inventory.available(p.id) > 0,
         }
         for p in results
     ], indent=2)
@@ -133,8 +161,8 @@ def get_product(product_id: str) -> str:
         "price_display": product.price_display,
         "category": product.category,
         "tags": product.tags,
-        "stock": product.stock,
-        "in_stock": product.stock > 0,
+        "stock": catalog.inventory.available(product.id),
+        "in_stock": catalog.inventory.available(product.id) > 0,
     }, indent=2)
 
 
@@ -314,57 +342,16 @@ def checkout(
     Returns:
         Order ID, payment link URL, and amount. Or error if validation fails.
     """
-    if not rzp_service:
-        return json.dumps({
-            "error": "Razorpay API keys not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env"
-        })
-
     try:
-        # Get and finalize cart
         cart = cart_mgr.get_cart(cart_id)
-
-        # Bounds check
-        audit.log(
-            AuditAction.BOUNDS_CHECK, actor="system",
-            details={"cart_id": cart_id, "total": cart.total,
-                     "max_allowed": settings.max_order_amount},
-            amount=cart.total,
-            reason=f"Order Rs.{cart.total/100:.2f} within bounds (max Rs.{settings.max_order_amount/100:.2f})"
-        )
-
-        # Finalize cart (no more modifications)
-        cart_mgr.finalize_cart(cart_id)
-
-        # Create Razorpay order + payment link
-        description = f"Agentic Storefront Order — {cart.item_count} items"
-        result = rzp_service.create_order_with_payment_link(
-            amount=cart.total,
-            currency="INR",
-            description=description,
-            customer={
-                "name": customer_name,
-                "email": customer_email,
-                "contact": customer_phone,
-            },
-            receipt=cart_id,
-            notes={
-                "cart_id": cart_id,
-                "items": ", ".join(f"{li.product_name} x{li.quantity}" for li in cart.items),
-                "source": "agentic-storefront",
-            },
-        )
-
-        return json.dumps({
-            "status": "order_created",
-            "order_id": result.order_id,
-            "payment_link_id": result.payment_link_id,
-            "payment_link_url": result.payment_link_url,
-            "amount_display": f"Rs.{result.amount/100:.2f}",
-            "currency": result.currency,
-            "cart_id": cart_id,
-            "message": "Payment link generated. Buyer can pay at the URL above.",
-        }, indent=2)
-
+        audit.log(AuditAction.BOUNDS_CHECK, actor="system", details={"cart_id": cart_id, "total": cart.total, "max_allowed": settings.max_order_amount}, amount=cart.total, reason=f"Order Rs.{cart.total/100:.2f} within bounds")
+        customer = {"name": customer_name, "email": customer_email, "contact": customer_phone}
+        result = cart_mgr.finalize_cart(cart_id, customer_details=customer)
+        if not result.success:
+            return json.dumps({"error": f"Checkout blocked or failed: {result.reason}"})
+            
+        status = "order_created_with_warnings" if result.needs_reconciliation else "order_created"
+        return json.dumps({"status": status, "payment_link_url": result.payment_link, "amount_display": f"Rs.{cart.total/100:.2f}", "message": result.reason}, indent=2)
     except CartExpiredError:
         return json.dumps({"error": f"Cart {cart_id} has expired. Create a new cart."})
     except CartError as e:

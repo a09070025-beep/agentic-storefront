@@ -18,7 +18,6 @@ import re
 import time
 import logging
 import os
-import re
 from typing import Optional
 from dataclasses import dataclass, field
 
@@ -32,6 +31,7 @@ from src.merchant_ai import MerchantAI, load_cost_prices
 from src.models import NegotiationMessage
 from src.razorpay_service import RazorpayService
 from src.audit_logger import AuditLogger
+from src.guardrail_factory import get_guardrail_stack, make_idempotency_key
 
 # 
 # Logging
@@ -83,7 +83,13 @@ def _create_session(phone: str) -> WhatsAppSession:
     if not products:
         raise RuntimeError("Could not load products from catalog")
 
-    merchant = MerchantAI(products=products, cost_prices=cost_prices, catalog=catalog)
+    # Wire guardrail stack into the MerchantAI
+    stack = get_guardrail_stack()
+    merchant = MerchantAI(
+        products=products, cost_prices=cost_prices, catalog=catalog,
+        inventory_manager=stack.inventory,
+    )
+    merchant.set_price_guard(stack.price_guard)
 
     session = WhatsAppSession(phone=phone, merchant=merchant)
 
@@ -93,11 +99,10 @@ def _create_session(phone: str) -> WhatsAppSession:
     session.round_number = 1
 
     logger.info(
-        "New session for %s | Products: %s | Retail: %.0f | Floor: %.0f",
+        "New session for %s | Products: %s | Retail: %.0f",
         phone,
         ", ".join(p.name for p in products),
         merchant.retail_price / 100,
-        merchant.floor_price / 100,
     )
 
     return session
@@ -189,58 +194,45 @@ def get_catalog_text() -> str:
 def create_payment_link(session: WhatsAppSession) -> str | None:
     """
     Generate a Razorpay payment link for the agreed deal.
+    ALL payment links go through PaymentGate.finalize_deal() — the single
+    choke point that re-checks the price, reserves inventory, and retries
+    on failure. No code path may bypass this.
     Returns the short_url or None on failure.
     """
-    settings = get_settings()
-
-    if not settings.razorpay_key_id or not settings.razorpay_key_secret:
-        logger.warning("Razorpay keys not configured  skipping payment link")
-        return None
-
     if not session.final_price_paise or session.final_price_paise <= 0:
         return None
 
     try:
-        client = get_razorpay_client(settings)
-        audit = AuditLogger(output_path="output/whatsapp_audit.jsonl")
-        rzp = RazorpayService(client=client, audit=audit, settings=settings)
+        stack = get_guardrail_stack()
 
-        product_names = ", ".join(p.name for p in session.merchant.products)
+        # Use first product's ID as the SKU for guardrail checks
+        sku = session.merchant.products[0].id if session.merchant.products else "unknown"
+        negotiation_id = f"wa-{session.phone}-{int(session.created_at)}"
+        agreed_price_rupees = session.final_price_paise / 100
 
-        # Extract phone digits for customer contact
-        phone_digits = re.sub(r"[^\d]", "", session.phone)
-        if phone_digits.startswith("91") and len(phone_digits) > 10:
-            phone_digits = phone_digits[-10:]  # Keep last 10 digits
+        # Idempotency key derived from phone + round — prevents double-charge on retry
+        idem_key = make_idempotency_key(negotiation_id, session.round_number)
 
-        order_result = rzp.create_order_with_payment_link(
-            amount=session.final_price_paise,
-            currency="INR",
-            description=f"WhatsApp Deal: {product_names}",
-            customer={
-                "name": "WhatsApp Customer",
-                "contact": phone_digits,
-            },
-            receipt=f"wa_deal_{int(time.time())}",
-            notes={
-                "source": "whatsapp_bot",
-                "phone": session.phone,
-                "retail_price": session.merchant.retail_price,
-                "negotiated_price": session.final_price_paise,
-                "products": product_names,
-            },
+        result = stack.payment_gate.finalize_deal(
+            negotiation_id=negotiation_id,
+            sku=sku,
+            agreed_price=agreed_price_rupees,
+            idempotency_key=idem_key,
         )
 
-        session.order_id = order_result.order_id
-        session.payment_link_url = order_result.payment_link_url
-
-        logger.info(
-            "Payment link created for %s: %s (%.0f)",
-            session.phone,
-            order_result.payment_link_url,
-            session.final_price_paise / 100,
-        )
-
-        return order_result.payment_link_url
+        if result.success and result.payment_link:
+            session.payment_link_url = result.payment_link
+            logger.info(
+                "Payment link created via PaymentGate for %s: %s (₹%.0f)",
+                session.phone, result.payment_link, agreed_price_rupees,
+            )
+            return result.payment_link
+        else:
+            logger.warning(
+                "PaymentGate blocked/failed for %s: %s",
+                session.phone, result.reason,
+            )
+            return None
 
     except Exception as e:
         logger.error("Payment link creation failed for %s: %s", session.phone, e)
@@ -251,12 +243,40 @@ def create_payment_link(session: WhatsAppSession) -> str | None:
 # Core Message Processing
 # 
 
+# --- P1-7: Per-phone rate limiter ---
+_rate_limit_window: dict[str, list[float]] = {}
+RATE_LIMIT_MAX_MESSAGES = 30      # max messages per window
+RATE_LIMIT_WINDOW_SECONDS = 600   # 10-minute window
+
+
+def _is_rate_limited(phone: str) -> bool:
+    """Check if a phone number has exceeded the rate limit."""
+    now = time.time()
+    timestamps = _rate_limit_window.get(phone, [])
+    # Purge old timestamps outside the window
+    timestamps = [t for t in timestamps if now - t < RATE_LIMIT_WINDOW_SECONDS]
+    if len(timestamps) >= RATE_LIMIT_MAX_MESSAGES:
+        _rate_limit_window[phone] = timestamps
+        return True
+    timestamps.append(now)
+    _rate_limit_window[phone] = timestamps
+    return False
+
+
 def process_message(phone: str, incoming_msg: str) -> str:
     """
     Process an incoming WhatsApp message and return the merchant's response.
     This is the main orchestrator that ties together session management,
     the Merchant AI, and Razorpay payment link generation.
     """
+    # --- Rate limit check ---
+    if _is_rate_limited(phone):
+        logger.warning("Rate limited: %s", phone)
+        return (
+            "⏱️ You're sending messages a bit too quickly! "
+            "Please wait a moment and try again."
+        )
+
     msg_lower = incoming_msg.strip().lower()
 
     #  Special Commands 
@@ -325,6 +345,21 @@ def process_message(phone: str, incoming_msg: str) -> str:
     session.conversation.append(buyer_msg)
     session.round_number += 1
 
+    # --- Audit: log every inbound buyer message ---
+    negotiation_id = f"wa-{phone}-{int(session.created_at)}"
+    try:
+        stack = get_guardrail_stack()
+        stack.audit.log_turn(
+            negotiation_id=negotiation_id,
+            round_number=session.round_number,
+            actor="buyer",
+            action="message",
+            proposed_price=buyer_price_paise / 100 if buyer_price_paise else None,
+            rationale=incoming_msg.strip()[:200],
+        )
+    except Exception:
+        pass  # Audit failure must not break the negotiation
+
     #  Call the Merchant AI 
 
     is_final_round = session.round_number >= 4
@@ -344,6 +379,23 @@ def process_message(phone: str, incoming_msg: str) -> str:
 
     # Append merchant response to conversation
     session.conversation.append(merchant_response)
+
+    # --- Audit: log every outbound merchant message ---
+    try:
+        action = "accept" if merchant_response.accepted else (
+            "walk_away" if merchant_response.walk_away else "counter_offer"
+        )
+        stack = get_guardrail_stack()
+        stack.audit.log_turn(
+            negotiation_id=negotiation_id,
+            round_number=session.round_number,
+            actor="merchant_ai",
+            action=action,
+            proposed_price=merchant_response.proposed_price / 100 if merchant_response.proposed_price else None,
+            rationale=merchant_response.message[:200],
+        )
+    except Exception:
+        pass
 
     logger.info(
         "Round %d/%d | %s | Buyer: %s | Merchant: %.0f | Accepted: %s",
@@ -427,6 +479,7 @@ async def health_check():
 
 @app.post("/whatsapp")
 async def whatsapp_webhook(
+    request: Request,
     Body: str = Form(""),
     From: str = Form(""),
     To: str = Form(""),
@@ -443,6 +496,23 @@ async def whatsapp_webhook(
 
     We process the message through the Merchant AI and return TwiML XML.
     """
+    # --- P1-6: Twilio webhook signature verification ---
+    settings = get_settings()
+    twilio_auth_token = os.getenv("TWILIO_AUTH_TOKEN", "")
+    if twilio_auth_token:
+        from twilio.request_validator import RequestValidator
+        validator = RequestValidator(twilio_auth_token)
+        signature = request.headers.get("X-Twilio-Signature", "")
+        # Reconstruct the full URL Twilio used to sign
+        url = str(request.url)
+        form_data = await request.form()
+        params = {k: v for k, v in form_data.items()}
+        if not validator.validate(url, params, signature):
+            logger.warning("Twilio signature verification FAILED from %s", From)
+            return Response(content="Forbidden", status_code=403)
+    else:
+        logger.debug("TWILIO_AUTH_TOKEN not set — skipping signature verification (dev mode)")
+
     phone = From.strip()
     incoming_msg = Body.strip()
 

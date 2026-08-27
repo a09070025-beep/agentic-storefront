@@ -83,6 +83,60 @@ class EvaluatorAI:
             raise ValueError("GEMINI_API_KEY not set. Add it to .env.")
         self.client = genai.Client(api_key=api_key)
 
+    def _repair_eval_json(self, raw: str) -> dict | None:
+        """Attempt to recover partial scores from truncated evaluator JSON."""
+        # Strategy 1: Try adding closing braces/brackets
+        for suffix in ['"}]}', '"}]}', '}]}', ']}', '}']:
+            try:
+                data = json.loads(raw + suffix)
+                if "scores" in data and len(data["scores"]) > 0:
+                    from rich import print as rprint
+                    rprint(f"[green]✅ JSON repaired — recovered {len(data['scores'])} metric(s)[/green]")
+                    # Recalculate total from recovered scores
+                    data["total_score"] = sum(s.get("score", 0) for s in data["scores"])
+                    data.setdefault("overall_feedback", "Partial evaluation recovered.")
+                    data.setdefault("needs_improvement", data["total_score"] < 50)
+                    return data
+            except json.JSONDecodeError:
+                continue
+
+        # Strategy 2: Regex extract individual score blocks
+        import re as _re
+        score_pattern = _re.compile(
+            r'"metric"\s*:\s*"([^"]+)"[^}]*"score"\s*:\s*(\d+)',
+            _re.DOTALL
+        )
+        matches = score_pattern.findall(raw)
+        if matches:
+            scores = []
+            for metric, score in matches:
+                # Try to also extract reasoning
+                reasoning_match = _re.search(
+                    rf'"metric"\s*:\s*"{_re.escape(metric)}"[^}}]*"reasoning"\s*:\s*"([^"]*)"',
+                    raw, _re.DOTALL
+                )
+                hint_match = _re.search(
+                    rf'"metric"\s*:\s*"{_re.escape(metric)}"[^}}]*"improvement_hint"\s*:\s*"([^"]*)"',
+                    raw, _re.DOTALL
+                )
+                scores.append({
+                    "metric": metric,
+                    "score": int(score),
+                    "reasoning": reasoning_match.group(1) if reasoning_match else "",
+                    "improvement_hint": hint_match.group(1) if hint_match else "",
+                })
+            total = sum(s["score"] for s in scores)
+            from rich import print as rprint
+            rprint(f"[green]✅ Regex recovery — extracted {len(scores)} metric(s), total={total}/50[/green]")
+            return {
+                "scores": scores,
+                "total_score": total,
+                "overall_feedback": f"Recovered {len(scores)}/5 metrics via regex.",
+                "needs_improvement": total < 50,
+            }
+
+        return None
+
     def evaluate(
         self,
         transcript: list[dict],
@@ -187,12 +241,12 @@ Return ONLY this JSON, no markdown, no explanation:
             config=types.GenerateContentConfig(
                 system_instruction=EVALUATOR_SYSTEM_PROMPT,
                 temperature=0.3,
-                max_output_tokens=2048,
+                max_output_tokens=4096,
                 response_mime_type="application/json",
             ),
         )
 
-        raw = response.text.strip()
+        raw = response.text.strip() if response.text else ""
         # Strip markdown code fences if present
         if raw.startswith("```"):
             raw = re.sub(r"^```[a-z]*\n?", "", raw)
@@ -203,10 +257,11 @@ Return ONLY this JSON, no markdown, no explanation:
             data = json.loads(raw)
         except json.JSONDecodeError as e:
             from rich import print as rprint
-            rprint(f"\n[bold yellow]⚠️ JSON Parse Error from Evaluator: {e}[/bold yellow]")
-            rprint(f"[yellow]Raw text:[/yellow]\n{raw}\n")
-            # Fallback: extract partial data
-            data = {"scores": [], "total_score": 0, "overall_feedback": "Evaluation parse error.", "needs_improvement": True}
+            rprint(f"\n[bold yellow]⚠️ JSON Parse Error from Evaluator — attempting repair...[/bold yellow]")
+            data = self._repair_eval_json(raw)
+            if data is None:
+                rprint(f"[yellow]Repair failed. Raw text:[/yellow]\n{raw[:500]}\n")
+                data = {"scores": [], "total_score": 0, "overall_feedback": "Evaluation parse error.", "needs_improvement": True}
 
         metric_scores = []
         for s in data.get("scores", []):
@@ -258,12 +313,12 @@ It FAILED these metrics (scored below 7/10):
 Overall feedback: {evaluation.overall_feedback}
 
 MERCHANT PARAMETERS that MUST be preserved as template placeholders:
-- {{product_details}} — product list with prices
-- {{retail_price}} — starting price in rupees
-- {{cost_price}} — cost price in rupees  
-- {{floor_price}} — absolute floor price in rupees (NEVER sell below this)
-- {{bundle_context}} — available bundle upsell options
-- {{scarcity_alerts}} — auto-injected scarcity warnings for low-stock items
+  - {{product_details}} — product list with prices
+  - {{retail_price}} — starting price in rupees
+  - {{bundle_context}} — available bundle upsell options
+  - {{scarcity_alerts}} — auto-injected scarcity warnings for low-stock items
+
+  IMPORTANT: DO NOT use placeholders for cost price or floor price. Refer to the floor constraint descriptively (e.g. "the server-side minimum price constraint") without ever using a literal substitutable token.
 
 Low-stock products at risk: {low_stock_str}
 

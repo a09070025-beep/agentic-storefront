@@ -76,7 +76,8 @@ def run_simulation(merchant, products, buyer_budget):
         "Simulate a negotiation between a Merchant AI and a Difficult Buyer.\n\n"
         "PRODUCTS: " + product_names + "\n"
         "RETAIL PRICE: Rs." + str(retail_r) + "\n"
-        "FLOOR PRICE: Rs." + str(floor_r) + " (never go below this)\n"
+        # NOTE: FLOOR PRICE is intentionally omitted — it is a server-side secret.
+        # The merchant uses check_price tool calls to enforce it, not context knowledge.
         "LOW-STOCK (merchant must use urgency): " + low_stock_str + "\n\n"
         "MERCHANT SYSTEM PROMPT (follow ALL rules):\n"
         + merchant.system_prompt + "\n\n"
@@ -114,7 +115,7 @@ def run_simulation(merchant, products, buyer_budget):
     # -- Try OSS API first ------------------------------------------------------
     try:
         from openai import OpenAI
-        from config import get_settings
+        from config import get_settings, GROQ_MODEL_NAME, oss_api_call_with_retry
         settings = get_settings()
         oss_key = settings.oss_api_key or os.getenv("OSS_API_KEY", "") or os.getenv("GROQ_API_KEY", "")
         oss_base = settings.oss_base_url or os.getenv("OSS_BASE_URL", "")
@@ -122,22 +123,20 @@ def run_simulation(merchant, products, buyer_budget):
             oss_base = "https://api.groq.com/openai/v1"
         if oss_key and oss_base:
             gcl = OpenAI(api_key=oss_key, base_url=oss_base)
-            for attempt in range(3):
-                try:
-                    resp = gcl.chat.completions.create(
-                        model="openai/gpt-oss-20b",
-                        messages=[
-                            {"role": "system", "content": "JSON simulation engine. Output ONLY a valid JSON array."},
-                            {"role": "user",   "content": sim_prompt},
-                        ],
-                        temperature=0.75, max_tokens=4096,
-                    )
-                    console.print("  [dim]Simulation via OSS API[/dim]")
-                    return parse(resp.choices[0].message.content)
-                except Exception as e:
-                    if attempt == 2:
-                        console.print(f"  [yellow]OSS API failed: {e}. Trying Gemini...[/yellow]")
-                    time.sleep(3)
+            try:
+                resp = oss_api_call_with_retry(
+                    gcl,
+                    model=GROQ_MODEL_NAME,
+                    messages=[
+                        {"role": "system", "content": "JSON simulation engine. Output ONLY a valid JSON array."},
+                        {"role": "user",   "content": sim_prompt},
+                    ],
+                    temperature=0.75, max_tokens=4096,
+                )
+                console.print("  [dim]Simulation via OSS API[/dim]")
+                return parse(resp.choices[0].message.content)
+            except Exception as e:
+                console.print(f"  [yellow]OSS API failed: {e}. Trying Gemini...[/yellow]")
         else:
             console.print("  [dim]No OSS_API_KEY -- using Gemini for simulation.[/dim]")
     except ImportError:
@@ -295,8 +294,8 @@ def main():
                 iteration=iteration,
             )
         except Exception as e:
-            console.print(f"[red]Evaluation failed: {e}[/red]")
-            import traceback; traceback.print_exc()
+            console.print(f"\n[bold red]❌ API Rate Limit / Quota Exceeded:[/bold red] {e}")
+            console.print("[yellow]Please wait 1 minute for your API quota to reset and try again.[/yellow]")
             break
 
         render_scores(result, iteration)
@@ -350,15 +349,111 @@ def main():
             import traceback; traceback.print_exc()
             break
 
-        required = ["{product_details}","{retail_price}","{floor_price}","{bundle_context}","{scarcity_alerts}"]
+        # Validate that required placeholders are present
+        # NOTE: {floor_price} is intentionally NOT required — it is now a server-side secret
+        required = ["{product_details}", "{retail_price}", "{bundle_context}", "{scarcity_alerts}"]
         missing  = [ph for ph in required if ph not in new_prompt]
         if missing:
             console.print(f"[yellow]Rewritten prompt missing placeholders {missing}. Keeping old prompt.[/yellow]")
         else:
-            Path(PROMPT_PATH).write_text(new_prompt, encoding="utf-8")
-            old_len = len(current_prompt.splitlines())
-            new_len = len(new_prompt.splitlines())
-            console.print(f"  [green]prompts/merchant_system.txt rewritten ({old_len} -> {new_len} lines, {len(new_prompt)} chars)[/green]")
+            # --- PromptRegistry staging gate ---
+            # Instead of writing directly to disk, propose the candidate and
+            # evaluate it against a held-out persona subset before promoting.
+            try:
+                from agentic_storefront_guardrails import PromptRegistry
+
+                # Initialize registry with current production prompt
+                if not hasattr(main, '_prompt_registry'):
+                    main._prompt_registry = PromptRegistry(initial_prompt=current_prompt)
+
+                registry = main._prompt_registry
+                candidate = registry.propose_candidate(new_prompt)
+
+                # Held-out eval: Run a fresh simulation against a DISJOINT persona
+                # to prove the candidate prompt generalizes, rather than just overfit
+                # to the training persona ("Vikram").
+                def held_out_eval(candidate_prompt: str) -> float:
+                    """Score a prompt by running a simulation on a held-out persona."""
+                    console.print("  [dim]Running held-out eval simulation (Persona: Priya)...[/dim]")
+                    # Create a temporary merchant with the candidate prompt
+                    temp_merchant = MerchantAI(products=products, catalog=catalog)
+                    temp_merchant.system_prompt = candidate_prompt
+
+                    # Held-out persona definition (disjoint from Vikram)
+                    eval_sim_prompt = (
+                        "Simulate a negotiation between a Merchant AI and a Buyer.\n\n"
+                        f"PRODUCTS: {', '.join(p.name for p in products)}\n"
+                        f"RETAIL PRICE: Rs.{retail_price//100}\n"
+                        "MERCHANT SYSTEM PROMPT:\n"
+                        f"{candidate_prompt}\n\n"
+                        "BUYER 'Priya': Polite but indecisive, very interested in bundled deals.\n"
+                        "Opens at Rs.1500 below retail. Does not use pressure, but needs convincing.\n"
+                        f"Will walk away if pushed too hard, but max budget is Rs.{(retail_price//100) - 500}.\n\n"
+                        "REQUIREMENTS: 3-5 rounds. Output ONLY a valid JSON array of the dialogue.\n"
+                        'Schema: [{"role":"merchant","message":"...","proposed_price":RUPEES_INT,"accepted":false,"walk_away":false}, ...]'
+                    )
+                    
+                    try:
+                        # Quick simulation using Gemini
+                        import google.genai as genai
+                        from google.genai import types
+                        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+                        resp = client.models.generate_content(
+                            model="gemini-3.6-flash",
+                            contents=eval_sim_prompt,
+                            config=types.GenerateContentConfig(temperature=0.7)
+                        )
+                        text = resp.text.strip()
+                        if text.startswith("```"):
+                            text = text.replace("```json", "").replace("```", "").strip()
+                        sim_history = json.loads(text)
+                        
+                        # Evaluate the fresh simulation
+                        eval_result = evaluator.evaluate(
+                            transcript=sim_history,
+                            floor_price=merchant.floor_price,
+                            retail_price=retail_price,
+                            products=[p.name for p in products],
+                            stock_levels=stock_levels
+                        )
+                        score_ratio = eval_result.total_score / 50.0
+                        console.print(f"  [dim]Held-out score: {eval_result.total_score}/50 ({score_ratio:.2f})[/dim]")
+                        return score_ratio
+                        
+                    except Exception as e:
+                        console.print(f"  [yellow]Held-out eval failed: {e}. Scoring 0.[/yellow]")
+                        return 0.0
+
+                promoted = registry.evaluate_and_promote(
+                    candidate=candidate,
+                    held_out_eval_fn=held_out_eval,
+                    min_improvement=0.02,  # candidate must beat production by 2% on the held-out set
+                )
+
+                if promoted:
+                    Path(PROMPT_PATH).write_text(new_prompt, encoding="utf-8")
+                    old_len = len(current_prompt.splitlines())
+                    new_len = len(new_prompt.splitlines())
+                    console.print(f"  [green]✅ Candidate PROMOTED and written to disk ({old_len} -> {new_len} lines)[/green]")
+                    console.print(f"  [dim]Version: {candidate.version_id[:8]}... | Score: {candidate.eval_detail}[/dim]")
+                else:
+                    console.print(f"  [yellow]⚠️  Candidate REJECTED — did not beat production by required margin[/yellow]")
+                    console.print(f"  [dim]Version: {candidate.version_id[:8]}... | Score: {candidate.eval_detail}[/dim]")
+
+                # Print version history summary
+                prompt_history = registry.history()
+                console.print(f"  [dim]Registry: {len(prompt_history)} versions total, "
+                              f"production={registry.production.version_id[:8]}...[/dim]")
+
+            except ImportError:
+                console.print("[bold red]FATAL: PromptRegistry not available — refusing to write prompt to disk.[/bold red]")
+                break
+            except ValueError as e:
+                console.print(f"[bold red]FATAL: {e}[/bold red]")
+                break
+            except Exception as e:
+                console.print(f"[bold red]FATAL: PromptRegistry error: {e} — refusing to write prompt to disk.[/bold red]")
+                break
 
         console.print()
         time.sleep(2)

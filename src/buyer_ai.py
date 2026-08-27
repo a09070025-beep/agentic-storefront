@@ -105,26 +105,29 @@ class BuyerAI:
         if not conversation_history or conversation_history[-1].role != "merchant":
             messages.append({"role": "user", "content": "Merchant has presented the products. Make your opening counter-offer."})
 
-        # Call API with small retry loop
-        max_retries = 3
-        content = ""
-        for attempt in range(max_retries):
-            try:
-                response = self.client.chat.completions.create(
-                    model="openai/gpt-oss-20b",
-                    messages=messages,
-                    temperature=0.8,
-                    max_tokens=1024,
-                )
-                content = response.choices[0].message.content or ""
-                break
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    raise e
-                from rich import print as rprint
-                rprint(f"  [dim]⏳ API error ({e}), retrying (attempt {attempt + 1}/{max_retries})...[/dim]", flush=True)
-                import time
-                time.sleep(2)
+        # Call API with robust retry loop
+        from config import GROQ_MODEL_NAME, oss_api_call_with_retry
+
+        try:
+            response = oss_api_call_with_retry(
+                self.client,
+                model=GROQ_MODEL_NAME,
+                messages=messages,
+                temperature=0.8,
+                max_tokens=1024,
+            )
+            content = response.choices[0].message.content or ""
+        except Exception as e:
+            from rich import print as rprint
+            rprint(f"  [bold red]BuyerAI API call failed after retries: {e}[/bold red]")
+            # Return a safe default message instead of crashing
+            return NegotiationMessage(
+                role="buyer",
+                message="I need a better price to make this work.",
+                proposed_price=int(self.budget * 0.7),
+                accepted=False,
+                walk_away=False,
+            )
 
         return self._parse_response(content)
 

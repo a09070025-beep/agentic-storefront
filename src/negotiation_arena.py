@@ -279,7 +279,7 @@ Ensure proposed_price is an integer (rupees).
         try:
             import os
             from openai import OpenAI
-            from config import get_settings
+            from config import get_settings, GROQ_MODEL_NAME, oss_api_call_with_retry
             settings = get_settings()
             api_key = settings.oss_api_key or os.getenv("OSS_API_KEY") or os.getenv("GROQ_API_KEY")
             base_url = settings.oss_base_url or os.getenv("OSS_BASE_URL")
@@ -289,8 +289,9 @@ Ensure proposed_price is an integer (rupees).
                 api_key=api_key,
                 base_url=base_url
             )
-            response = client.chat.completions.create(
-                model="openai/gpt-oss-20b",
+            response = oss_api_call_with_retry(
+                client,
+                model=GROQ_MODEL_NAME,
                 messages=[
                     {"role": "system", "content": "You are a JSON simulation engine. Output ONLY a valid JSON array. No explanation."},
                     {"role": "user", "content": prompt}

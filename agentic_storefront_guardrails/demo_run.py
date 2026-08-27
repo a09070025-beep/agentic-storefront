@@ -1,3 +1,4 @@
+from agentic_storefront_guardrails.schemas import CheckoutItem
 """
 demo_run.py
 -----------
@@ -17,10 +18,10 @@ Run: python demo_run.py
 
 import json
 
-from guardrails import ProductCatalog, ProductRules, PriceGuard
-from inventory_lock import InventoryManager
-from audit_log import AuditLog
-from payment_gate import (
+from agentic_storefront_guardrails.guardrails import ProductCatalog, ProductRules, PriceGuard
+from agentic_storefront_guardrails.inventory_lock import InventoryManager
+from agentic_storefront_guardrails.audit_log import AuditLog
+from agentic_storefront_guardrails.payment_gate import (
     PaymentGate, IdempotencyStore, demo_injection_attempt, flaky_razorpay_call,
 )
 
@@ -49,7 +50,7 @@ def build_stack(db_path: str = "demo_audit_log.sqlite3", razorpay_fn=None):
         inventory=inventory,
         audit=audit,
         idempotency=idempotency,
-        razorpay_create_link_fn=razorpay_fn or (lambda sku, amt: f"https://rzp.io/l/demo-{sku}-{int(amt)}"),
+        razorpay_create_link_fn=razorpay_fn or (lambda items, amt, cust=None: f"https://rzp.io/l/demo-{items[0].sku}-{int(amt)}"),
     )
     return catalog, price_guard, inventory, audit, idempotency, gate
 
@@ -58,7 +59,7 @@ def scenario_normal_deal(gate: PaymentGate, audit: AuditLog):
     audit.log_turn("neg-001", 1, "buyer", "offer", proposed_price=6000)
     audit.log_turn("neg-001", 2, "merchant_ai", "counter_offer", proposed_price=8500)
     audit.log_turn("neg-001", 3, "buyer", "accept", proposed_price=8500)
-    result = gate.finalize_deal("neg-001", "SKU123", 8500.0, "idem-neg-001")
+    result = gate.finalize_deal("neg-001", [CheckoutItem(sku="SKU123", agreed_price=8500.0, quantity=1)], "idem-neg-001")
     print("\n[Scenario 1: normal deal]")
     print(result)
 
@@ -87,7 +88,7 @@ def scenario_graceful_gateway_failure(price_guard, inventory, audit, idempotency
     gate = PaymentGate(price_guard, inventory, audit, idempotency,
                         razorpay_create_link_fn=fresh_flaky_call())
     audit.log_turn("neg-002", 1, "buyer", "accept", proposed_price=9000)
-    result = gate.finalize_deal("neg-002", "SKU123", 9000.0, "idem-neg-002")
+    result = gate.finalize_deal("neg-002", [CheckoutItem(sku="SKU123", agreed_price=9000.0, quantity=1)], "idem-neg-002")
     print("\n[Scenario 3: gateway retried then succeeded]")
     print(result)
 

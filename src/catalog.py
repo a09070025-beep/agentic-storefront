@@ -6,6 +6,12 @@ Loads from data/catalog.json and provides structured search for AI buyers.
 
 import json
 from pathlib import Path
+import sys
+import os
+
+# Add parent directory to path so we can import from agentic_storefront_guardrails
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from agentic_storefront_guardrails.inventory_lock import InventoryManager
 
 from src.models import Product
 
@@ -13,8 +19,9 @@ from src.models import Product
 class CatalogStore:
     """Product catalog with search, filtering, and stock management."""
 
-    def __init__(self, catalog_path: str = "data/catalog.json"):
+    def __init__(self, catalog_path: str = "data/catalog.json", inventory: InventoryManager | None = None):
         self._products: dict[str, Product] = {}
+        self.inventory = inventory or InventoryManager()
         self._load_catalog(catalog_path)
 
     def _load_catalog(self, path: str) -> None:
@@ -23,6 +30,8 @@ class CatalogStore:
         for item in data:
             product = Product(**item)
             self._products[product.id] = product
+            # Initialize stock in InventoryManager
+            self.inventory.set_stock(product.id, product.stock)
 
     @property
     def product_count(self) -> int:
@@ -114,28 +123,28 @@ class CatalogStore:
 
     def check_stock(self, product_id: str, quantity: int) -> bool:
         """Check if requested quantity is available."""
-        product = self._products.get(product_id)
-        if not product:
-            return False
-        return product.stock >= quantity
+        return self.inventory.available(product_id) >= quantity
 
-    def reserve_stock(self, product_id: str, quantity: int) -> bool:
-        """Reserve stock for a cart (decrements available count).
+    def reserve_stock(self, product_id: str, quantity: int, negotiation_id: str) -> str:
+        """Reserve stock for a cart. Returns reservation ID. Raises if insufficient."""
+        return self.inventory.reserve(product_id, negotiation_id, quantity=quantity, ttl_seconds=15 * 60)
 
-        Returns True if successful, False if insufficient stock.
-        """
-        product = self._products.get(product_id)
-        if not product or product.stock < quantity:
-            return False
+    def update_reservation(self, old_reservation_id: str, product_id: str, new_quantity: int, negotiation_id: str) -> str:
+        """Update a reservation by releasing the old one and reserving the new total quantity."""
+        if old_reservation_id:
+            self.inventory.release(old_reservation_id)
+        return self.inventory.reserve(product_id, negotiation_id, quantity=new_quantity, ttl_seconds=15 * 60)
 
-        product.stock -= quantity
-        return True
+    def extend_reservation(self, reservation_id: str, extra_seconds: int = 300) -> bool:
+        return self.inventory.extend_ttl(reservation_id, extra_seconds)
 
-    def release_stock(self, product_id: str, quantity: int) -> None:
+    def release_stock(self, reservation_id: str) -> None:
         """Release previously reserved stock (cart expired/cancelled)."""
-        product = self._products.get(product_id)
-        if product:
-            product.stock += quantity
+        self.inventory.release(reservation_id)
+        
+    def confirm_stock(self, reservation_id: str) -> None:
+        """Permanently decrement stock for a reservation."""
+        self.inventory.confirm(reservation_id)
 
     def get_products_by_ids(self, product_ids: list[str]) -> list[Product]:
         """Get multiple products by their IDs. Skips unknown IDs."""

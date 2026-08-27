@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 import math
 
-from schemas import PriceCheckResult
+from .schemas import PriceCheckResult
 
 
 @dataclass(frozen=True)
@@ -80,9 +80,15 @@ class PriceGuard:
         jailbroken conversation to extract and exploit.
         """
         result = self._evaluate(sku, proposed_price)
+        
+        # Flatten the reason string to prevent Price Oracle binary search attacks.
+        # If we return granular reasons like "Below floor" vs "Exceeds discount cap",
+        # an attacker can probe repeatedly to find the exact boundary.
+        reason = "OK" if result.allowed else "Price not approved"
+        
         return {
             "allowed": result.allowed,
-            "reason": result.reason,
+            "reason": reason,
             # Deliberately NOT returning floor_price/list_price here.
         }
 
@@ -98,7 +104,13 @@ class PriceGuard:
 
     # ---- shared logic ------------------------------------------------
     def _evaluate(self, sku: str, proposed_price: float) -> PriceCheckResult:
-        rules = self.catalog.get(sku)
+        try:
+            rules = self.catalog.get(sku)
+        except KeyError:
+            return PriceCheckResult(
+                False, f"Unrecognized SKU: {sku}", 0.0, 0.0,
+                proposed_price if proposed_price is not None else 0.0
+            )
 
         if proposed_price is None or math.isnan(proposed_price):
             return PriceCheckResult(False, "Price is missing/NaN",

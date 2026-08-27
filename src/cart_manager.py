@@ -16,6 +16,8 @@ from src.models import (
 from src.catalog import CatalogStore
 from src.upsell_engine import UpsellEngine
 from src.audit_logger import AuditLogger
+from agentic_storefront_guardrails.payment_gate import PaymentGate
+from agentic_storefront_guardrails.schemas import CheckoutItem
 
 
 class CartError(Exception):
@@ -66,12 +68,14 @@ class CartManager:
         catalog: CatalogStore,
         upsell: UpsellEngine,
         audit: AuditLogger,
+        payment_gate: "PaymentGate",
         settings: Settings | None = None,
         coupons_path: str = "data/coupons.json",
     ):
         self.catalog = catalog
         self.upsell = upsell
         self.audit = audit
+        self.payment_gate = payment_gate
         self.settings = settings or get_settings()
         self._carts: dict[str, Cart] = {}
         self._coupons: dict[str, Coupon] = {}
@@ -133,20 +137,21 @@ class CartManager:
                 raise InvalidProductError(f"Product {product_id} not found")
 
             # Validate stock
-            if not self.catalog.check_stock(product_id, quantity):
+            avail_stock = self.catalog.inventory.available(product_id)
+            if avail_stock < quantity:
                 self.audit.log(
                     AuditAction.STOCK_INSUFFICIENT, actor="system",
                     details={"product_id": product_id, "requested": quantity,
-                             "available": product.stock},
+                             "available": avail_stock},
                     status="failed",
-                    reason=f"{product.name} has only {product.stock} in stock, requested {quantity}"
+                    reason=f"{product.name} has only {avail_stock} in stock, requested {quantity}"
                 )
                 raise OutOfStockError(
-                    f"{product.name} — only {product.stock} available, requested {quantity}"
+                    f"{product.name} — only {avail_stock} available, requested {quantity}"
                 )
 
             # Reserve stock
-            self.catalog.reserve_stock(product_id, quantity)
+            reservation_id = self.catalog.reserve_stock(product_id, quantity, negotiation_id=cart_id)
             self.audit.log(
                 AuditAction.STOCK_RESERVED, actor="system",
                 details={"product_id": product_id, "quantity": quantity},
@@ -160,6 +165,7 @@ class CartManager:
                 quantity=quantity,
                 unit_price=product.price,
                 line_total=line_total,
+                reservation_id=reservation_id
             ))
 
         cart = Cart(
@@ -194,9 +200,10 @@ class CartManager:
         if not product:
             raise InvalidProductError(f"Product {product_id} not found")
 
-        if not self.catalog.check_stock(product_id, quantity):
+        avail_stock = self.catalog.inventory.available(product_id)
+        if avail_stock < quantity:
             raise OutOfStockError(
-                f"{product.name} — only {product.stock} available"
+                f"{product.name} — only {avail_stock} available"
             )
 
         # Check if product already in cart — increment quantity
@@ -207,7 +214,8 @@ class CartManager:
                     raise BoundsExceededError(
                         f"Total quantity {new_qty} exceeds max {self.settings.max_item_quantity}"
                     )
-                self.catalog.reserve_stock(product_id, quantity)
+                # Update reservation for the new total quantity
+                item.reservation_id = self.catalog.update_reservation(item.reservation_id, product_id, new_qty, negotiation_id=cart_id)
                 item.quantity = new_qty
                 item.line_total = item.unit_price * new_qty
                 cart = self._calculate_totals(cart)
@@ -223,13 +231,14 @@ class CartManager:
                 return cart
 
         # New product
-        self.catalog.reserve_stock(product_id, quantity)
+        reservation_id = self.catalog.reserve_stock(product_id, quantity, negotiation_id=cart_id)
         cart.items.append(LineItem(
             product_id=product_id,
             product_name=product.name,
-            quantity=quantity,
             unit_price=product.price,
+            quantity=quantity,
             line_total=product.price * quantity,
+            reservation_id=reservation_id
         ))
         cart = self._calculate_totals(cart)
         self._validate_bounds(cart)
@@ -249,7 +258,8 @@ class CartManager:
 
         for item in cart.items:
             if item.product_id == product_id:
-                self.catalog.release_stock(product_id, item.quantity)
+                if item.reservation_id:
+                    self.catalog.release_stock(item.reservation_id)
                 cart.items.remove(item)
                 cart = self._calculate_totals(cart)
 
@@ -363,11 +373,42 @@ class CartManager:
         """Get cart by ID."""
         return self._get_valid_cart(cart_id)
 
-    def finalize_cart(self, cart_id: str) -> Cart:
-        """Mark cart as checked out. Prevents further modifications."""
+    def finalize_cart(self, cart_id: str, customer_details: dict | None = None) -> "PaymentGateResult":
+        """Checkout all items via PaymentGate."""
         cart = self._get_valid_cart(cart_id)
-        cart.status = CartStatus.CHECKED_OUT
-        return cart
+        
+        # Build CheckoutItems
+        checkout_items = [
+            CheckoutItem(
+                sku=li.product_id,
+                agreed_price=li.unit_price,
+                quantity=li.quantity,
+                reservation_id=li.reservation_id
+            ) for li in cart.items
+        ]
+        
+        # We need a stable idempotency key for this cart checkout attempt
+        idempotency_key = f"checkout_{cart_id}_{cart.item_count}"
+        
+        result = self.payment_gate.finalize_deal(
+            negotiation_id=cart_id,
+            items=checkout_items,
+            idempotency_key=idempotency_key,
+            customer_details=customer_details
+        )
+        
+        if result.success:
+            if getattr(result, "needs_reconciliation", False):
+                cart.status = CartStatus.CHECKED_OUT_NEEDS_RECONCILIATION
+            else:
+                cart.status = CartStatus.CHECKED_OUT
+        else:
+            # Payment failed, reservations were released by PaymentGate. 
+            # We must clear the reservation IDs from the cart so it can't be confirmed again.
+            for li in cart.items:
+                li.reservation_id = ""
+                
+        return result
 
     def _get_valid_cart(self, cart_id: str) -> Cart:
         """Get cart and validate it's active and not expired."""
@@ -383,7 +424,8 @@ class CartManager:
             cart.status = CartStatus.EXPIRED
             # Release reserved stock
             for item in cart.items:
-                self.catalog.release_stock(item.product_id, item.quantity)
+                if item.reservation_id:
+                    self.catalog.release_stock(item.reservation_id)
                 self.audit.log(
                     AuditAction.STOCK_RELEASED, actor="system",
                     details={"product_id": item.product_id, "quantity": item.quantity},

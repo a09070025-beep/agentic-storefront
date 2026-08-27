@@ -5,6 +5,7 @@ Single source of truth for all settings.
 """
 
 import os
+import time
 from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
@@ -14,6 +15,64 @@ import razorpay
 # Load .env from project root
 _PROJECT_ROOT = Path(__file__).parent
 load_dotenv(_PROJECT_ROOT / ".env")
+
+
+# ──────────────────────────────────────────────
+# Groq / OSS Model — Single Source of Truth
+# ──────────────────────────────────────────────
+
+GROQ_MODEL_NAME = "openai/gpt-oss-20b"
+"""The model name to use for all Groq/OSS API calls (Buyer AI, simulations, etc.)."""
+
+
+def oss_api_call_with_retry(client, max_retries: int = 5, base_delay: float = 2.0, **kwargs):
+    """Call an OpenAI-compatible API with robust exponential backoff.
+
+    Detects 429 (rate limit), 503 (unavailable), and connection errors.
+    Parses 'retry-after' hints from error messages when available.
+
+    Args:
+        client: An OpenAI-compatible client instance.
+        max_retries: Maximum number of retry attempts.
+        base_delay: Initial delay in seconds (doubles each attempt).
+        **kwargs: Passed directly to client.chat.completions.create().
+
+    Returns:
+        The API response object.
+    """
+    import re as _re
+
+    for attempt in range(max_retries + 1):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except Exception as e:
+            err = str(e).lower()
+            retryable = any(x in err for x in [
+                "429", "rate_limit", "rate limit", "too many requests",
+                "503", "unavailable", "overloaded", "quota",
+                "timeout", "connection", "reset by peer",
+            ])
+            if retryable and attempt < max_retries:
+                # Try to parse retry-after hint from the error
+                delay_match = _re.search(r'retry[\s_-]*(?:in|after)\s*(\d+)', err)
+                if delay_match:
+                    delay = int(delay_match.group(1)) + 2
+                else:
+                    delay = base_delay * (2 ** attempt)
+
+                try:
+                    from rich import print as rprint
+                    rprint(
+                        f"  [dim]⏳ API rate limited, retrying in {delay:.0f}s "
+                        f"(attempt {attempt + 1}/{max_retries})...[/dim]",
+                        flush=True,
+                    )
+                except ImportError:
+                    print(f"  ⏳ API rate limited, retrying in {delay:.0f}s...")
+
+                time.sleep(delay)
+                continue
+            raise
 
 
 class Settings(BaseModel):

@@ -23,6 +23,7 @@ class Reservation:
     sku: str
     negotiation_id: str
     expires_at: float
+    quantity: int = 1
 
 
 class InventoryManager:
@@ -41,10 +42,10 @@ class InventoryManager:
         read from, not raw stock."""
         with self._lock:
             self._expire_locked()
-            reserved = sum(1 for r in self._reservations.values() if r.sku == sku)
+            reserved = sum(r.quantity for r in self._reservations.values() if r.sku == sku)
             return max(0, self._stock.get(sku, 0) - reserved)
 
-    def reserve(self, sku: str, negotiation_id: str, ttl_seconds: int = 180) -> str:
+    def reserve(self, sku: str, negotiation_id: str, quantity: int = 1, ttl_seconds: int = 180) -> str:
         """
         Call this the moment a negotiation reaches 'accept', BEFORE
         calling the payment-link tool. Raises if nothing is available.
@@ -52,23 +53,40 @@ class InventoryManager:
         """
         with self._lock:
             self._expire_locked()
-            reserved = sum(1 for r in self._reservations.values() if r.sku == sku)
-            if self._stock.get(sku, 0) - reserved <= 0:
+            reserved = sum(r.quantity for r in self._reservations.values() if r.sku == sku)
+            if self._stock.get(sku, 0) - reserved < quantity:
                 raise RuntimeError(f"No stock available to reserve for {sku}")
-            reservation_id = f"{sku}:{negotiation_id}:{time.time()}"
+            import uuid
+            reservation_id = f"{sku}:{negotiation_id}:{uuid.uuid4().hex[:8]}"
             self._reservations[reservation_id] = Reservation(
                 sku=sku, negotiation_id=negotiation_id,
                 expires_at=time.time() + ttl_seconds,
+                quantity=quantity
             )
             return reservation_id
+
+    def extend_ttl(self, reservation_id: str, extra_seconds: int = 300) -> bool:
+        """
+        Extends the TTL of a reservation. Returns False if the reservation 
+        was not found (e.g., already expired). Use this BEFORE an external 
+        payment call to guarantee the lock outlives the network request.
+        """
+        with self._lock:
+            self._expire_locked()
+            res = self._reservations.get(reservation_id)
+            if not res:
+                return False
+            res.expires_at = time.time() + extra_seconds
+            return True
 
     def confirm(self, reservation_id: str) -> None:
         """Call after payment succeeds — permanently decrements stock
         and removes the reservation."""
         with self._lock:
             res = self._reservations.pop(reservation_id, None)
-            if res is not None:
-                self._stock[res.sku] = max(0, self._stock.get(res.sku, 0) - 1)
+            if res is None:
+                raise RuntimeError(f"Reservation {reservation_id} not found. It may have expired.")
+            self._stock[res.sku] = max(0, self._stock.get(res.sku, 0) - res.quantity)
 
     def release(self, reservation_id: str) -> None:
         """Call on payment failure/timeout/buyer abandonment."""

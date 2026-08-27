@@ -24,9 +24,10 @@ import random
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional
 
-from guardrails import PriceGuard
-from inventory_lock import InventoryManager
-from audit_log import AuditLog
+from .guardrails import PriceGuard
+from .inventory_lock import InventoryManager
+from .audit_log import AuditLog
+from .schemas import CheckoutItem
 
 
 class PaymentBlockedError(Exception):
@@ -40,6 +41,7 @@ class PaymentGateResult:
     success: bool
     payment_link: Optional[str]
     reason: str
+    needs_reconciliation: bool = False
 
 
 class IdempotencyStore:
@@ -71,65 +73,99 @@ class PaymentGate:
         self.idempotency = idempotency
         self._create_link = razorpay_create_link_fn
 
-    def finalize_deal(self, negotiation_id: str, sku: str, agreed_price: float,
-                       idempotency_key: str, max_retries: int = 2) -> PaymentGateResult:
+    def finalize_deal(self, negotiation_id: str, items: list[CheckoutItem],
+                      idempotency_key: str, max_retries: int = 2,
+                      customer_details: dict | None = None) -> PaymentGateResult:
 
         # 1. Idempotency — never double-charge on retry
         existing = self.idempotency.get(idempotency_key)
         if existing:
-            self.audit.log_payment(negotiation_id, idempotency_key, sku,
-                                    agreed_price, "created",
-                                    "returned existing idempotent link")
+            self.audit.log_payment(negotiation_id, idempotency_key, "CART",
+                                   sum(i.agreed_price * i.quantity for i in items), 
+                                   "created", "returned existing idempotent link")
             return PaymentGateResult(True, existing, "idempotent replay")
 
-        # 2. Authoritative price re-check — the actual injection defense
-        check = self.price_guard.authoritative_check(sku, agreed_price)
-        self.audit.log_guardrail(negotiation_id, "hard", sku, agreed_price,
-                                  check.allowed, check.reason)
-        if not check.allowed:
-            self.audit.log_payment(negotiation_id, idempotency_key, sku,
-                                    agreed_price, "blocked", check.reason)
-            return PaymentGateResult(False, None,
-                                      f"Blocked by price guard: {check.reason}")
-
-        # 3. Reserve inventory
+        # 2. Authoritative price re-check & 3. Inventory lock/refresh
+        total_amount = 0.0
+        active_reservations = []
+        
+        # Pre-collect any incoming reservations so we guarantee they are released on failure
+        for item in items:
+            if item.reservation_id:
+                active_reservations.append(item.reservation_id)
+                
         try:
-            reservation_id = self.inventory.reserve(sku, negotiation_id)
-        except RuntimeError as e:
-            self.audit.log_payment(negotiation_id, idempotency_key, sku,
-                                    agreed_price, "blocked", str(e))
+            for item in items:
+                # Price check
+                check = self.price_guard.authoritative_check(item.sku, item.agreed_price)
+                self.audit.log_guardrail(negotiation_id, "hard", item.sku, item.agreed_price,
+                                         check.allowed, check.reason)
+                if not check.allowed:
+                    raise PaymentBlockedError(f"Blocked by price guard on {item.sku}: {check.reason}")
+                
+                total_amount += item.agreed_price * item.quantity
+                
+                # Inventory: extend existing TTL, or reserve fresh
+                if item.reservation_id:
+                    if not self.inventory.extend_ttl(item.reservation_id, 300):
+                        raise RuntimeError(f"Reservation {item.reservation_id} for {item.sku} expired mid-checkout.")
+                else:
+                    new_res_id = self.inventory.reserve(item.sku, negotiation_id, quantity=item.quantity)
+                    active_reservations.append(new_res_id)
+        
+        except (PaymentBlockedError, RuntimeError) as e:
+            # Rollback ALL reservations (incoming + newly created)
+            for res_id in active_reservations:
+                self.inventory.release(res_id)
+            self.audit.log_payment(negotiation_id, idempotency_key, "CART", 0, "blocked", str(e))
             return PaymentGateResult(False, None, str(e))
 
         # 4. Call Razorpay with retry + graceful degradation
+        link = None
         last_error = ""
         for attempt in range(1, max_retries + 2):
             try:
-                link = self._create_link(sku, agreed_price)
-                self.idempotency.put(idempotency_key, link)
-                self.inventory.confirm(reservation_id)
-                self.audit.log_payment(negotiation_id, idempotency_key, sku,
-                                        agreed_price, "created",
-                                        f"succeeded on attempt {attempt}")
-                return PaymentGateResult(True, link, "ok")
-            except Exception as e:  # noqa: BLE001 - deliberately broad, this is a boundary
+                link = self._create_link(items, total_amount, customer_details)
+                break  # Success, exit retry loop
+            except Exception as e:
                 last_error = str(e)
-                self.audit.log_payment(negotiation_id, idempotency_key, sku,
-                                        agreed_price, "retried",
-                                        f"attempt {attempt} failed: {last_error}")
-                time.sleep(min(2 ** attempt, 5))  # simple backoff
 
-        # 5. Graceful failure — release stock, log, surface a clean
-        # message instead of crashing or leaving a dangling reservation.
-        self.inventory.release(reservation_id)
-        self.audit.log_payment(negotiation_id, idempotency_key, sku,
-                                agreed_price, "failed",
-                                f"exhausted retries: {last_error}")
-        return PaymentGateResult(
-            False, None,
-            "Payment link could not be created after retries. "
-            "Deal held, no charge created, escalated for manual follow-up.",
-        )
+        if not link:
+            # Exhausted retries, release reservations explicitly
+            for res_id in active_reservations:
+                self.inventory.release(res_id)
+            self.audit.log_payment(negotiation_id, idempotency_key, "CART", 0, "failed", f"Razorpay API failed: {last_error}")
+            return PaymentGateResult(False, None, f"Payment API failed: {last_error}")
 
+        self.idempotency.put(idempotency_key, link)
+        
+        # 5. Confirm ALL
+        needs_reconciliation = False
+        for res_id in active_reservations:
+            confirm_success = False
+            for confirm_attempt in range(3):
+                try:
+                    self.inventory.confirm(res_id)
+                    confirm_success = True
+                    break
+                except RuntimeError as e:
+                    if "not found" in str(e).lower():
+                        break # Permanent failure, don't retry
+                    time.sleep(0.5)
+                except Exception:
+                    time.sleep(0.5)
+            
+            if not confirm_success:
+                needs_reconciliation = True
+                self.audit.log_payment(negotiation_id, idempotency_key, "CART", total_amount, "fatal", f"Failed to confirm stock for reservation {res_id}")
+                
+        if needs_reconciliation:
+            return PaymentGateResult(True, link, "WARNING: Payment created but some stock confirmations failed.", needs_reconciliation=True)
+
+        self.audit.log_payment(negotiation_id, idempotency_key, "CART",
+                               total_amount, "created",
+                               f"deal verified, {len(items)} items locked and paid")
+        return PaymentGateResult(True, link, "Payment link created")
 
 # ---------------------------------------------------------------------
 # Demo scenario 1: injection attack blocked
@@ -143,8 +179,7 @@ def demo_injection_attempt(gate: PaymentGate):
     """
     result = gate.finalize_deal(
         negotiation_id="demo-injection-001",
-        sku="SKU123",
-        agreed_price=0.0,
+        items=[CheckoutItem(sku="SKU123", agreed_price=0.0, quantity=1)],
         idempotency_key="demo-injection-001-key",
     )
     print("Injection attempt result:", result)
@@ -154,7 +189,7 @@ def demo_injection_attempt(gate: PaymentGate):
 # ---------------------------------------------------------------------
 # Demo scenario 2: Razorpay gateway failure handled gracefully
 # ---------------------------------------------------------------------
-def flaky_razorpay_call(sku: str, amount: float) -> str:
+def flaky_razorpay_call(items: list[CheckoutItem], amount: float, customer: dict | None = None) -> str:
     """Fails the first two calls, then succeeds — simulates a transient
     gateway/network issue for the 'one failure handled gracefully' demo."""
     if not hasattr(flaky_razorpay_call, "_calls"):
@@ -162,4 +197,4 @@ def flaky_razorpay_call(sku: str, amount: float) -> str:
     flaky_razorpay_call._calls += 1
     if flaky_razorpay_call._calls < 3:
         raise ConnectionError("Simulated Razorpay gateway timeout")
-    return f"https://rzp.io/l/demo-{sku}-{int(amount)}"
+    return f"https://rzp.io/l/demo-{items[0].sku}-{int(amount)}"

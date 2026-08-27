@@ -1,0 +1,51 @@
+.\scratch_inventory_tests.py:3:from agentic_storefront_guardrails.inventory_lock import InventoryManager
+.\scratch_inventory_tests.py:6:inv = InventoryManager()
+.\scratch_inventory_tests.py:22:inv = InventoryManager()
+.\scratch_inventory_tests.py:49:inv = InventoryManager()
+.\self_improving_trainer.py:68:sl = p.stock_level if p.stock_level is not None else p.stock
+.\self_improving_trainer.py:235:stock_levels = {p.name: (p.stock_level if p.stock_level is not None else p.stock) for p in products}
+.\self_improving_trainer.py:262:f"Scarcity alerts: {sum(1 for p in products if (p.stock_level or p.stock) <= 5)} product(s)")
+.\test_full_integration.py:3:Tests: factory init, PriceGuard, PaymentGate, InventoryManager, AuditLog,
+.\test_full_integration.py:97:# ── 3. InventoryManager ────────────────────────────────────
+.\test_full_integration.py:98:print("\n[3] InventoryManager")
+.\agentic_storefront_guardrails\demo_run.py:21:from inventory_lock import InventoryManager
+.\agentic_storefront_guardrails\demo_run.py:36:inventory = InventoryManager()
+.\agentic_storefront_guardrails\inventory_lock.py:29:class InventoryManager:
+.\agentic_storefront_guardrails\payment_gate.py:28:from inventory_lock import InventoryManager
+.\agentic_storefront_guardrails\payment_gate.py:59:def __init__(self, price_guard: PriceGuard, inventory: InventoryManager,
+.\agentic_storefront_guardrails\__init__.py:15:from .inventory_lock import InventoryManager
+.\buyer\agent.py:99:if product and product.stock > 0:
+.\src\cart_manager.py:150:reservation_id = self.catalog.reserve_stock(product_id, quantity, negotiation_id=cart_id)
+.\src\cart_manager.py:230:self.catalog.reserve_stock(product_id, quantity)
+.\src\cart_manager.py:257:self.catalog.release_stock(item.reservation_id)
+.\src\cart_manager.py:378:self.catalog.confirm_stock(item.reservation_id)
+.\src\cart_manager.py:396:self.catalog.release_stock(item.reservation_id)
+.\src\catalog.py:14:from agentic_storefront_guardrails.inventory_lock import InventoryManager
+.\src\catalog.py:22:def __init__(self, catalog_path: str = "data/catalog.json", inventory: InventoryManager | None = None):
+.\src\catalog.py:24:self.inventory = inventory or InventoryManager()
+.\src\catalog.py:33:# Initialize stock in InventoryManager
+.\src\catalog.py:34:self.inventory.set_stock(product.id, product.stock)
+.\src\catalog.py:200:in_stock = store.check_stock("prod_001", 5)
+.\src\catalog.py:203:oos = store.check_stock("prod_090", 1)
+.\src\catalog.py:207:original = store.get_product("prod_001").stock
+.\src\catalog.py:208:reserved = store.reserve_stock("prod_001", 3)
+.\src\catalog.py:209:after_reserve = store.get_product("prod_001").stock
+.\src\catalog.py:210:store.release_stock("prod_001", 3)
+.\src\catalog.py:211:after_release = store.get_product("prod_001").stock
+.\src\guardrail_factory.py:5:needs PriceGuard / PaymentGate / InventoryManager / AuditLog.
+.\src\guardrail_factory.py:20:InventoryManager, AuditLog, PaymentGate, IdempotencyStore,
+.\src\guardrail_factory.py:31:inventory: InventoryManager
+.\src\guardrail_factory.py:111:def _build_inventory(products_json_path: str | None = None) -> InventoryManager:
+.\src\guardrail_factory.py:112:"""Build an InventoryManager seeded with stock levels from the catalog."""
+.\src\guardrail_factory.py:113:inventory = InventoryManager()
+.\src\merchant_ai.py:165:# Build product details (with stock level from InventoryManager if available)
+.\src\merchant_ai.py:172:stock_lvl = p.stock_level if p.stock_level is not None else p.stock
+.\src\merchant_ai.py:178:# Build scarcity alerts — use InventoryManager.available() when wired
+.\src\merchant_ai.py:185:stock_lvl = p.stock_level if p.stock_level is not None else p.stock
+.\src\merchant_ai.py:222:stock_lvl = p.stock_level if p.stock_level is not None else p.stock
+.\src\models.py:76:if self.stock_level is None:
+.\src\models.py:77:object.__setattr__(self, "stock_level", self.stock)
+.\src\models.py:87:lvl = self.stock_level if self.stock_level is not None else self.stock
+.\src\models.py:93:lvl = self.stock_level if self.stock_level is not None else self.stock
+.\src\upsell_engine.py:75:if not product or not product.active or product.stock <= 0:
+.\src\upsell_engine.py:176:if p.id not in exclude and p.stock > 0

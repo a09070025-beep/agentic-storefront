@@ -144,3 +144,56 @@ class AuditLog:
                 "ORDER BY ts", (negotiation_id,))]
         return {"negotiation_id": negotiation_id, "turns": turns,
                 "guardrail_events": guardrails, "payment_events": payments}
+
+    def get_dashboard_metrics(self) -> dict:
+        """Calculate aggregate business metrics for the global dashboard."""
+        with self._conn() as conn:
+            conn.row_factory = sqlite3.Row
+            
+            # 1. Total Deals & GMV
+            row = conn.execute(
+                "SELECT COUNT(DISTINCT negotiation_id) as total_deals, "
+                "SUM(amount) as gmv "
+                "FROM payment_events WHERE status = 'created'"
+            ).fetchone()
+            total_deals = row['total_deals'] or 0
+            gmv = row['gmv'] or 0.0
+            
+            # 2. Blocked Injections (Hard guardrail blocks)
+            row = conn.execute(
+                "SELECT COUNT(*) as blocked "
+                "FROM guardrail_events WHERE allowed = 0 AND check_type = 'hard'"
+            ).fetchone()
+            blocked_injections = row['blocked'] or 0
+            
+            # 3. Total Unique Negotiations started
+            row = conn.execute(
+                "SELECT COUNT(DISTINCT negotiation_id) as total_negs "
+                "FROM negotiation_turns"
+            ).fetchone()
+            total_negs = row['total_negs'] or 0
+            
+            # 4. Average Rounds per Negotiation
+            row = conn.execute(
+                "SELECT AVG(max_round) as avg_rounds FROM ("
+                "  SELECT MAX(round_number) as max_round "
+                "  FROM negotiation_turns GROUP BY negotiation_id"
+                ")"
+            ).fetchone()
+            avg_rounds = round(row['avg_rounds'] or 0, 1)
+
+            # 5. Recent failed deals (Walk Aways)
+            walk_aways = conn.execute(
+                "SELECT COUNT(DISTINCT negotiation_id) as walk_aways "
+                "FROM negotiation_turns WHERE action = 'walk_away'"
+            ).fetchone()['walk_aways'] or 0
+
+            return {
+                "total_deals": total_deals,
+                "gmv": gmv,
+                "blocked_injections": blocked_injections,
+                "total_negotiations": total_negs,
+                "win_rate_pct": round((total_deals / total_negs * 100) if total_negs > 0 else 0, 1),
+                "avg_rounds": avg_rounds,
+                "walk_aways": walk_aways
+            }

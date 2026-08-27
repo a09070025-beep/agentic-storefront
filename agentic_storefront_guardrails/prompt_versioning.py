@@ -58,6 +58,9 @@ class PromptRegistry:
         return prod[-1]
 
     def propose_candidate(self, prompt_text: str) -> PromptVersion:
+        lower_p = prompt_text.lower()
+        if 'cost' in lower_p or 'floor' in lower_p or '1.15' in lower_p:
+            raise ValueError('Data Leak: Prompt contains cost, floor, or margin multiplier data. Refusing to propose.')
         """Called by your Evaluator/self-improvement loop when it wants
         to try a rewritten prompt. This does NOT go live."""
         candidate = PromptVersion(
@@ -75,6 +78,7 @@ class PromptRegistry:
         candidate: PromptVersion,
         held_out_eval_fn: Callable[[str], float],
         min_improvement: float = 0.03,
+        eval_iterations: int = 3,
     ) -> bool:
         """
         held_out_eval_fn(prompt_text) -> score in [0, 1], computed against
@@ -84,16 +88,20 @@ class PromptRegistry:
         and periodically refresh it.
 
         Promotion requires beating production by `min_improvement`, not
-        just posting a high absolute number, so noisy single-run scores
-        don't flip your live merchant on a fluke.
+        just posting a high absolute number. Averages over `eval_iterations`
+        runs to smooth out LLM stochasticity (the "lucky run" problem).
         """
-        candidate_score = held_out_eval_fn(candidate.prompt_text)
-        production_score = held_out_eval_fn(self.production.prompt_text)
+        def _get_average_score(prompt_text: str) -> float:
+            scores = [held_out_eval_fn(prompt_text) for _ in range(eval_iterations)]
+            return sum(scores) / len(scores) if scores else 0.0
+
+        candidate_score = _get_average_score(candidate.prompt_text)
+        production_score = _get_average_score(self.production.prompt_text)
 
         candidate.eval_score = candidate_score
         candidate.eval_detail = (
             f"candidate={candidate_score:.4f} vs "
-            f"production={production_score:.4f}"
+            f"production={production_score:.4f} (mean of {eval_iterations} runs)"
         )
 
         if candidate_score >= production_score + min_improvement:

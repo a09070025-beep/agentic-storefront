@@ -97,3 +97,12 @@ class PriceCheckResult:
     floor_price: float
     list_price: float
     checked_price: float
+
+
+@dataclass(frozen=True)
+class CheckoutItem:
+    """A validated line item ready for checkout."""
+    sku: str
+    agreed_price: float
+    quantity: int
+    reservation_id: str | None = None

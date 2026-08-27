@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, field_validator
 class CartStatus(str, Enum):
     ACTIVE = "active"
     CHECKED_OUT = "checked_out"
+    CHECKED_OUT_NEEDS_RECONCILIATION = "checked_out_needs_reconciliation"
     EXPIRED = "expired"
     CANCELLED = "cancelled"
 
@@ -105,6 +106,7 @@ class LineItem(BaseModel):
     quantity: int = Field(ge=1, le=10)
     unit_price: int = Field(ge=0, description="Price per unit in paise")
     line_total: int = Field(ge=0, description="quantity × unit_price in paise")
+    reservation_id: str | None = None
 
     @field_validator("line_total", mode="before")
     @classmethod
