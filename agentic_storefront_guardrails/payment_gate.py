@@ -71,14 +71,16 @@ class PaymentGate:
         claim_result = self.audit.claim_idempotency_key(idempotency_key)
         if not claim_result['success']:
             if claim_result['status'] == 'NEEDS_RECONCILIATION':
-                return PaymentGateResult(False, None, claim_result['reason'], needs_reconciliation=True)
+                return PaymentGateResult(False, None,
+                    "This checkout session requires manual review. Please contact support or modify your cart to try again.",
+                    needs_reconciliation=True)
             elif claim_result['status'] in ('COMPLETED', 'RECONCILED_COMPLETED'):
                 self.audit.log_payment(negotiation_id, idempotency_key, "CART",
                                        sum(i.agreed_price * i.quantity for i in items),
                                        "created", "returned existing idempotent link")
                 return PaymentGateResult(True, claim_result['payment_link'], "idempotent replay")
             else:
-                # PENDING (non-expired) — another request is in-flight
+                # PENDING (non-expired) — another request is genuinely in-flight
                 return PaymentGateResult(False, None, "Checkout in progress for this cart. Please wait.")
 
         # 2. Authoritative price re-check & 3. Inventory lock/refresh
