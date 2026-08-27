@@ -24,7 +24,7 @@ from src.models import (
 )
 from src.buyer_ai import BuyerAI
 from src.merchant_ai import MerchantAI
-from src.audit_logger import AuditLogger
+from agentic_storefront_guardrails.audit_log import AuditLog
 from src.razorpay_service import RazorpayService
 
 
@@ -197,13 +197,13 @@ class NegotiationArena:
         merchant: MerchantAI,
         products: list[Product],
         max_rounds: int = 4,
-        audit: AuditLogger | None = None,
+        audit: AuditLog | None = None,
     ):
         self.buyer = buyer
         self.merchant = merchant
         self.products = products
         self.max_rounds = max_rounds
-        self.audit = audit or AuditLogger(output_path="output/negotiation_audit.jsonl")
+        self.audit = audit or AuditLog("data/pg_audit.sqlite3")
         self.conversation: list[NegotiationMessage] = []
 
     def run(self) -> NegotiationResult:

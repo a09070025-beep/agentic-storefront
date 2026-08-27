@@ -61,7 +61,7 @@ def run_demo():
     from src.catalog import CatalogStore
     from src.upsell_engine import UpsellEngine
     from src.cart_manager import CartManager
-    from src.audit_logger import AuditLogger
+    from agentic_storefront_guardrails.audit_log import AuditLog
     from src.models import AuditAction
 
     console.print(Panel.fit(
@@ -72,7 +72,7 @@ def run_demo():
     ))
 
     settings = get_settings()
-    audit = AuditLogger(output_path="output/demo_audit.jsonl")
+    audit = AuditLog("data/pg_audit.sqlite3")
     audit.clear()
     catalog = CatalogStore()
     upsell_eng = UpsellEngine(catalog)
@@ -259,7 +259,7 @@ def run_negotiate():
     from src.buyer_ai import BuyerAI
     from src.merchant_ai import MerchantAI, load_cost_prices
     from src.negotiation_arena import NegotiationArena
-    from src.audit_logger import AuditLogger
+    from agentic_storefront_guardrails.audit_log import AuditLog
 
     console.print(Panel.fit(
         "[bold]AGENTIC STOREFRONT[/bold]\n"
@@ -299,7 +299,7 @@ def run_negotiate():
     merchant = MerchantAI(products=products, cost_prices=cost_prices)
 
     # Create arena and run
-    audit = AuditLogger(output_path="output/negotiation_audit.jsonl")
+    audit = AuditLog("data/pg_audit.sqlite3")
     audit.clear()
 
     arena = NegotiationArena(

@@ -30,7 +30,7 @@ from src.catalog import CatalogStore
 from src.merchant_ai import MerchantAI, load_cost_prices
 from src.models import NegotiationMessage
 from src.razorpay_service import RazorpayService
-from src.audit_logger import AuditLogger
+from agentic_storefront_guardrails.audit_log import AuditLog
 from src.guardrail_factory import get_guardrail_stack, make_idempotency_key
 
 # 

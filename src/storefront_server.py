@@ -31,16 +31,17 @@ from src.cart_manager import (
     MinCartValueError, BoundsExceededError, CartExpiredError,
 )
 from src.razorpay_service import RazorpayService
-from src.audit_logger import AuditLogger
 
 
-from agentic_storefront_guardrails.payment_gate import PaymentGate, IdempotencyStore
+
+from agentic_storefront_guardrails.payment_gate import PaymentGate, 
 from agentic_storefront_guardrails.guardrails import PriceGuard, ProductCatalog, ProductRules
 from agentic_storefront_guardrails.schemas import CheckoutItem
 
 # ── Initialize components ─────────────────────────────────────────────
 settings = get_settings()
-audit = AuditLogger(output_path=settings.audit_output_path)
+
+audit = AuditLog("data/pg_audit.sqlite3")
 catalog = CatalogStore(catalog_path=settings.catalog_path)
 upsell = UpsellEngine(catalog, rules_path=settings.bundle_rules_path)
 
@@ -66,12 +67,12 @@ def _create_link_adapter(items, amount: float, customer: dict = None) -> str:
 
 price_guard = PriceGuard(ProductCatalog()) # Dummy, not strictly matching the JSON right now, but sufficient for initialization
 from agentic_storefront_guardrails.audit_log import AuditLog
-pg_audit = AuditLog("data/pg_audit.sqlite3")
+pg_audit = audit
 payment_gate = PaymentGate(
     price_guard=price_guard,
     inventory=catalog.inventory,
     audit=pg_audit, 
-    idempotency=IdempotencyStore(),
+    idempotency=(),
     razorpay_create_link_fn=_create_link_adapter,
 )
 

@@ -12,15 +12,15 @@ import hmac
 import json
 
 from src.models import AuditAction
-from src.audit_logger import AuditLogger
+from agentic_storefront_guardrails.audit_log import AuditLog
 
 
 class WebhookHandler:
     """Handles Razorpay webhook events with signature verification."""
 
-    def __init__(self, webhook_secret: str, audit: AuditLogger | None = None):
+    def __init__(self, webhook_secret: str, audit: AuditLog | None = None):
         self.webhook_secret = webhook_secret
-        self.audit = audit or AuditLogger()
+        self.audit = audit or AuditLog("data/pg_audit.sqlite3")
 
     def verify_signature(self, payload: str | bytes, signature: str) -> bool:
         """Verify the X-Razorpay-Signature header.
@@ -187,7 +187,7 @@ if __name__ == "__main__":
 
     console.print("\n[bold blue]Webhook Handler — Self-Test[/bold blue]\n")
 
-    audit = AuditLogger(output_path="output/test_webhook_audit.jsonl")
+    audit = AuditLog("data/pg_audit.sqlite3")
     audit.clear()
     handler = WebhookHandler(webhook_secret="test_secret_123", audit=audit)
 

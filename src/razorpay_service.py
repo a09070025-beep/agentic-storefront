@@ -15,7 +15,7 @@ import razorpay
 import time
 from config import Settings, get_razorpay_client, get_settings
 from src.models import AuditAction, OrderResult, PaymentStatus
-from src.audit_logger import AuditLogger
+from agentic_storefront_guardrails.audit_log import AuditLog
 
 
 def _retry_api_call(func, *args, max_retries: int = 4, base_delay: float = 2.0, **kwargs):
@@ -38,11 +38,11 @@ class RazorpayService:
     def __init__(
         self,
         client: razorpay.Client | None = None,
-        audit: AuditLogger | None = None,
+        audit: AuditLog | None = None,
         settings: Settings | None = None,
     ):
         self.settings = settings or get_settings()
-        self.audit = audit or AuditLogger()
+        self.audit = audit or AuditLog()
 
         if client:
             self.client = client
@@ -257,7 +257,7 @@ if __name__ == "__main__":
         console.print("\n[bold yellow]Razorpay Service module loaded OK (no live test)[/bold yellow]\n")
         sys.exit(0)
 
-    audit = AuditLogger(output_path="output/test_rzp_audit.jsonl")
+    audit = AuditLog("data/pg_audit.sqlite3")
     audit.clear()
 
     try:

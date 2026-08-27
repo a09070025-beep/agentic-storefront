@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 from agentic_storefront_guardrails import (
     ProductCatalog, ProductRules, PriceGuard,
-    InventoryManager, AuditLog, PaymentGate, IdempotencyStore,
+    InventoryManager, AuditLog, PaymentGate,
 )
 from src.razorpay_service import RazorpayService
 from config import get_settings
@@ -30,7 +30,6 @@ class GuardrailStack:
     price_guard: PriceGuard
     inventory: InventoryManager
     audit: AuditLog
-    idempotency: IdempotencyStore
     payment_gate: PaymentGate
 
 
@@ -130,7 +129,7 @@ def _build_inventory(products_json_path: str | None = None) -> InventoryManager:
 _stack: GuardrailStack | None = None
 
 
-def get_guardrail_stack(db_path: str = "output/guardrail_audit.sqlite3") -> GuardrailStack:
+def get_guardrail_stack(db_path: str = "data/pg_audit.sqlite3") -> GuardrailStack:
     """Get or create the shared guardrail stack singleton."""
     global _stack
     if _stack is not None:
@@ -140,14 +139,12 @@ def get_guardrail_stack(db_path: str = "output/guardrail_audit.sqlite3") -> Guar
     price_guard = PriceGuard(product_catalog)
     inventory = _build_inventory()
     audit = AuditLog(db_path=db_path)
-    idempotency = IdempotencyStore()
     razorpay_fn = _build_razorpay_create_link_fn()
 
     payment_gate = PaymentGate(
         price_guard=price_guard,
         inventory=inventory,
         audit=audit,
-        idempotency=idempotency,
         razorpay_create_link_fn=razorpay_fn,
     )
 
@@ -156,7 +153,6 @@ def get_guardrail_stack(db_path: str = "output/guardrail_audit.sqlite3") -> Guar
         price_guard=price_guard,
         inventory=inventory,
         audit=audit,
-        idempotency=idempotency,
         payment_gate=payment_gate,
     )
     return _stack

@@ -1,14 +1,3 @@
-"""
-audit_log.py
-------------
-Answers the buildathon's judging bar directly:
-"Every money action explainable, bounded and gated. Show the audit trail."
-
-Implementation notes:
-- SQLite, single file, zero external dependencies.
-- Append-only tables with triggers.
-"""
-
 import sqlite3
 import json
 import time
@@ -16,7 +5,7 @@ import uuid
 from contextlib import contextmanager
 from typing import Optional
 
-SCHEMA = """
+SCHEMA = '''
 CREATE TABLE IF NOT EXISTS negotiation_turns (
     id TEXT PRIMARY KEY,
     negotiation_id TEXT NOT NULL,
@@ -67,9 +56,9 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     created_at REAL NOT NULL,
     expires_at REAL NOT NULL
 );
-"""
+'''
 
-IMMUTABILITY_TRIGGERS = """
+IMMUTABILITY_TRIGGERS = '''
 CREATE TRIGGER IF NOT EXISTS no_update_turns
 BEFORE UPDATE ON negotiation_turns
 BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END;
@@ -101,12 +90,15 @@ BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS no_delete_app
 BEFORE DELETE ON app_events
 BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END;
-"""
+
+-- Notice idempotency_keys doesn't have an immutability trigger because it's a state machine that updates.
+'''
 
 class AuditLog:
     def __init__(self, db_path: str = "audit_log.sqlite3"):
         self.db_path = db_path
         with self._conn() as conn:
+            # Enable WAL mode for concurrency
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(SCHEMA)
             conn.executescript(IMMUTABILITY_TRIGGERS)
@@ -148,27 +140,35 @@ class AuditLog:
                  amount, status, detail, time.time()),
             )
 
-    def log(self, action: str, actor: str, details: dict = None, amount: float = None, reason: str = None):
-        """Unified with the old JSONL AuditLogger."""
+    def log_app_event(self, action: str, actor: str, details: dict = None, amount: float = None, reason: str = None):
         with self._conn() as conn:
-            # handle ENUMs like AuditAction.xxx by converting to str
-            action_str = str(action.value) if hasattr(action, 'value') else str(action)
             conn.execute(
                 "INSERT INTO app_events VALUES (?,?,?,?,?,?,?)",
-                (str(uuid.uuid4()), action_str, actor, json.dumps(details) if details else None, amount, reason, time.time())
+                (str(uuid.uuid4()), action, actor, json.dumps(details) if details else None, amount, reason, time.time())
             )
 
+    # Idempotency methods
     def claim_idempotency_key(self, key: str, ttl_seconds: int = 60) -> dict:
+        \"\"\"
+        Attempts to claim an idempotency key.
+        Returns dict with:
+        - success (bool): True if claimed, False if exists/conflict
+        - status (str): 'PENDING', 'COMPLETED', 'NEEDS_RECONCILIATION', etc
+        - payment_link (str): The link if COMPLETED
+        \"\"\"
         now = time.time()
         with self._conn() as conn:
+            # Check existing
             row = conn.execute("SELECT status, payment_link, expires_at FROM idempotency_keys WHERE id=?", (key,)).fetchone()
             if row:
                 status, link, expires_at = row
                 if status == 'PENDING' and now > expires_at:
+                    # Expired pending -> flag for reconciliation
                     conn.execute("UPDATE idempotency_keys SET status='NEEDS_RECONCILIATION' WHERE id=?", (key,))
                     return {'success': False, 'status': 'NEEDS_RECONCILIATION', 'payment_link': None, 'reason': 'Expired pending claim flagged for reconciliation'}
                 return {'success': False, 'status': status, 'payment_link': link, 'reason': 'Key already exists'}
             
+            # Claim new
             conn.execute("INSERT INTO idempotency_keys (id, status, payment_link, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
                          (key, 'PENDING', None, now, now + ttl_seconds))
             return {'success': True, 'status': 'PENDING', 'payment_link': None, 'reason': 'Claimed'}
@@ -179,6 +179,7 @@ class AuditLog:
             conn.execute("UPDATE idempotency_keys SET status=?, payment_link=? WHERE id=?", (status, payment_link, key))
             
     def resolve_idempotency_key(self, key: str, payment_link: str = None, failed: bool = False):
+        \"\"\"Ops resolution tool\"\"\"
         with self._conn() as conn:
             status = 'RECONCILED_FAILED' if failed else 'RECONCILED_COMPLETED'
             conn.execute("UPDATE idempotency_keys SET status=?, payment_link=? WHERE id=?", (status, payment_link, key))
@@ -198,18 +199,37 @@ class AuditLog:
     def get_dashboard_metrics(self) -> dict:
         with self._conn() as conn:
             conn.row_factory = sqlite3.Row
-            row = conn.execute("SELECT COUNT(DISTINCT negotiation_id) as total_deals, SUM(amount) as gmv FROM payment_events WHERE status = 'created'").fetchone()
+            row = conn.execute(
+                "SELECT COUNT(DISTINCT negotiation_id) as total_deals, SUM(amount) as gmv FROM payment_events WHERE status = 'created'"
+            ).fetchone()
             total_deals = row['total_deals'] or 0
             gmv = row['gmv'] or 0.0
-            row = conn.execute("SELECT COUNT(*) as blocked FROM guardrail_events WHERE allowed = 0 AND check_type = 'hard'").fetchone()
+            row = conn.execute(
+                "SELECT COUNT(*) as blocked FROM guardrail_events WHERE allowed = 0 AND check_type = 'hard'"
+            ).fetchone()
             blocked_injections = row['blocked'] or 0
-            row = conn.execute("SELECT COUNT(DISTINCT negotiation_id) as total_negs FROM negotiation_turns").fetchone()
+            row = conn.execute(
+                "SELECT COUNT(DISTINCT negotiation_id) as total_negs FROM negotiation_turns"
+            ).fetchone()
             total_negs = row['total_negs'] or 0
-            row = conn.execute("SELECT AVG(max_round) as avg_rounds FROM (SELECT MAX(round_number) as max_round FROM negotiation_turns GROUP BY negotiation_id)").fetchone()
+            row = conn.execute(
+                "SELECT AVG(max_round) as avg_rounds FROM (SELECT MAX(round_number) as max_round FROM negotiation_turns GROUP BY negotiation_id)"
+            ).fetchone()
             avg_rounds = round(row['avg_rounds'] or 0, 1)
-            walk_aways = conn.execute("SELECT COUNT(DISTINCT negotiation_id) as walk_aways FROM negotiation_turns WHERE action = 'walk_away'").fetchone()['walk_aways'] or 0
+            walk_aways = conn.execute(
+                "SELECT COUNT(DISTINCT negotiation_id) as walk_aways FROM negotiation_turns WHERE action = 'walk_away'"
+            ).fetchone()['walk_aways'] or 0
+
             return {
-                "total_deals": total_deals, "gmv": gmv, "blocked_injections": blocked_injections,
-                "total_negotiations": total_negs, "win_rate_pct": round((total_deals / total_negs * 100) if total_negs > 0 else 0, 1),
-                "avg_rounds": avg_rounds, "walk_aways": walk_aways
+                "total_deals": total_deals,
+                "gmv": gmv,
+                "blocked_injections": blocked_injections,
+                "total_negotiations": total_negs,
+                "win_rate_pct": round((total_deals / total_negs * 100) if total_negs > 0 else 0, 1),
+                "avg_rounds": avg_rounds,
+                "walk_aways": walk_aways
             }
+'''
+
+with open('agentic_storefront_guardrails/audit_log.py', 'w', encoding='utf-8') as f:
+    f.write(SCHEMA)

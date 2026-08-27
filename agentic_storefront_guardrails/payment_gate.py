@@ -44,22 +44,12 @@ class PaymentGateResult:
     needs_reconciliation: bool = False
 
 
-class IdempotencyStore:
-    """Prevents duplicate payment links if a request is retried or a
-    webhook fires twice. Swap for Redis/DB in production."""
-    def __init__(self):
-        self._seen: Dict[str, str] = {}  # idempotency_key -> payment_link
 
-    def get(self, key: str) -> Optional[str]:
-        return self._seen.get(key)
-
-    def put(self, key: str, payment_link: str) -> None:
-        self._seen[key] = payment_link
 
 
 class PaymentGate:
     def __init__(self, price_guard: PriceGuard, inventory: InventoryManager,
-                 audit: AuditLog, idempotency: IdempotencyStore,
+                 audit: AuditLog,
                  razorpay_create_link_fn: Callable[[str, float], str]):
         """
         razorpay_create_link_fn: your real MCP call, e.g.
@@ -70,20 +60,27 @@ class PaymentGate:
         self.price_guard = price_guard
         self.inventory = inventory
         self.audit = audit
-        self.idempotency = idempotency
+        
         self._create_link = razorpay_create_link_fn
 
     def finalize_deal(self, negotiation_id: str, items: list[CheckoutItem],
                       idempotency_key: str, max_retries: int = 2,
                       customer_details: dict | None = None) -> PaymentGateResult:
 
-        # 1. Idempotency — never double-charge on retry
-        existing = self.idempotency.get(idempotency_key)
-        if existing:
-            self.audit.log_payment(negotiation_id, idempotency_key, "CART",
-                                   sum(i.agreed_price * i.quantity for i in items), 
-                                   "created", "returned existing idempotent link")
-            return PaymentGateResult(True, existing, "idempotent replay")
+        # 1. Idempotency — 2-phase claim
+        claim_result = self.audit.claim_idempotency_key(idempotency_key)
+        if not claim_result['success']:
+            if claim_result['status'] == 'NEEDS_RECONCILIATION':
+                return PaymentGateResult(False, None, claim_result['reason'], needs_reconciliation=True)
+            elif claim_result['status'] == 'COMPLETED' or claim_result['status'] == 'RECONCILED_COMPLETED':
+                self.audit.log_payment(negotiation_id, idempotency_key, "CART",
+                                       sum(i.agreed_price * i.quantity for i in items),
+                                       "created", "returned existing idempotent link")
+                return PaymentGateResult(True, claim_result['payment_link'], "idempotent replay")
+            elif claim_result['status'] == 'RECONCILED_FAILED' or claim_result['status'] == 'FAILED':
+                return PaymentGateResult(False, None, "Previous payment session failed. Please modify cart to generate a new checkout session.")
+            else:
+                return PaymentGateResult(False, None, "Checkout in progress for this cart. Please wait.")
 
         # 2. Authoritative price re-check & 3. Inventory lock/refresh
         total_amount = 0.0
@@ -114,6 +111,7 @@ class PaymentGate:
                     active_reservations.append(new_res_id)
         
         except (PaymentBlockedError, RuntimeError) as e:
+            self.audit.commit_idempotency_key(idempotency_key, failed=True)
             # Rollback ALL reservations (incoming + newly created)
             for res_id in active_reservations:
                 self.inventory.release(res_id)
@@ -131,13 +129,14 @@ class PaymentGate:
                 last_error = str(e)
 
         if not link:
+            self.audit.commit_idempotency_key(idempotency_key, failed=True)
             # Exhausted retries, release reservations explicitly
             for res_id in active_reservations:
                 self.inventory.release(res_id)
             self.audit.log_payment(negotiation_id, idempotency_key, "CART", 0, "failed", f"Razorpay API failed: {last_error}")
             return PaymentGateResult(False, None, f"Payment API failed: {last_error}")
 
-        self.idempotency.put(idempotency_key, link)
+        self.audit.commit_idempotency_key(idempotency_key, link)
         
         # 5. Confirm ALL
         needs_reconciliation = False

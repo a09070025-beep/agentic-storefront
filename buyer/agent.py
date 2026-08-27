@@ -19,7 +19,7 @@ from src.cart_manager import (
     CartManager, OutOfStockError, InvalidProductError,
     InvalidCouponError, MinCartValueError, BoundsExceededError,
 )
-from src.audit_logger import AuditLogger
+from agentic_storefront_guardrails.audit_log import AuditLog
 from src.razorpay_service import RazorpayService
 from config import get_settings, get_razorpay_client
 from buyer.scenarios import get_scenarios, PurchaseScenario
@@ -34,7 +34,7 @@ class AgenticBuyer:
 
     def __init__(self, use_razorpay: bool = False, verbose: bool = True):
         self.settings = get_settings()
-        self.audit = AuditLogger(output_path=self.settings.audit_output_path)
+        self.audit = AuditLog("data/pg_audit.sqlite3")
         self.audit.clear()
         self.catalog = CatalogStore(catalog_path=self.settings.catalog_path)
         self.upsell = UpsellEngine(self.catalog, rules_path=self.settings.bundle_rules_path)

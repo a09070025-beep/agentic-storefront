@@ -15,7 +15,7 @@ from src.models import (
 )
 from src.catalog import CatalogStore
 from src.upsell_engine import UpsellEngine
-from src.audit_logger import AuditLogger
+from agentic_storefront_guardrails.audit_log import AuditLog
 from agentic_storefront_guardrails.payment_gate import PaymentGate
 from agentic_storefront_guardrails.schemas import CheckoutItem
 
@@ -67,7 +67,7 @@ class CartManager:
         self,
         catalog: CatalogStore,
         upsell: UpsellEngine,
-        audit: AuditLogger,
+        audit: AuditLog,
         payment_gate: "PaymentGate",
         settings: Settings | None = None,
         coupons_path: str = "data/coupons.json",
@@ -481,7 +481,7 @@ if __name__ == "__main__":
     console.print("\n[bold blue]Cart Manager — Self-Test[/bold blue]\n")
 
     catalog = CatalogStore()
-    audit = AuditLogger(output_path="output/test_cart_audit.jsonl")
+    audit = AuditLog("data/pg_audit.sqlite3")
     audit.clear()
     upsell = UpsellEngine(catalog)
     cart_mgr = CartManager(catalog, upsell, audit)
