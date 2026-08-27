@@ -341,6 +341,115 @@ def test_idem_ttl_paymentgate():
     
     os.remove(db)
 
+@test("Concurrent reclaim on FAILED key: exactly one thread wins, loser gets rejection")
+def test_idem_concurrent_reclaim():
+    from agentic_storefront_guardrails.audit_log import AuditLog
+    import threading, tempfile, os, uuid
+    
+    db = os.path.join(tempfile.gettempdir(), f"test_idem_race_{uuid.uuid4().hex[:8]}.sqlite3")
+    if os.path.exists(db):
+        os.remove(db)
+    audit = AuditLog(db_path=db)
+    
+    # Setup: claim and mark FAILED
+    audit.claim_idempotency_key("race-key", ttl_seconds=300)
+    audit.commit_idempotency_key("race-key", failed=True)
+    
+    barrier = threading.Barrier(2, timeout=5)
+    results = [None, None]
+    
+    def racer(idx):
+        barrier.wait()  # Both threads release at the same instant
+        results[idx] = audit.claim_idempotency_key("race-key", ttl_seconds=300)
+    
+    t0 = threading.Thread(target=racer, args=(0,))
+    t1 = threading.Thread(target=racer, args=(1,))
+    t0.start()
+    t1.start()
+    t0.join(timeout=5)
+    t1.join(timeout=5)
+    
+    assert results[0] is not None, "Thread 0 didn't return"
+    assert results[1] is not None, "Thread 1 didn't return"
+    
+    winners = [r for r in results if r['success'] == True]
+    losers = [r for r in results if r['success'] == False]
+    
+    assert len(winners) == 1, f"Expected exactly 1 winner, got {len(winners)}: {results}"
+    assert len(losers) == 1, f"Expected exactly 1 loser, got {len(losers)}: {results}"
+    assert winners[0]['status'] == 'PENDING', f"Winner should be PENDING: {winners[0]}"
+    assert losers[0]['status'] == 'PENDING', f"Loser should see winner's PENDING state: {losers[0]}"
+    
+    os.remove(db)
+
+@test("ops_resolve rejects resolving a key not in NEEDS_RECONCILIATION state")
+def test_ops_resolve_guard():
+    from agentic_storefront_guardrails.audit_log import AuditLog
+    import tempfile, os, sqlite3
+    
+    db = os.path.join(tempfile.gettempdir(), "test_ops_guard.sqlite3")
+    if os.path.exists(db):
+        os.remove(db)
+    audit = AuditLog(db_path=db)
+    
+    # Case 1: PENDING key — should not be resolvable
+    audit.claim_idempotency_key("pending-key", ttl_seconds=300)
+    conn = sqlite3.connect(db)
+    row = conn.execute("SELECT status FROM idempotency_keys WHERE id='pending-key'").fetchone()
+    conn.close()
+    assert row[0] == 'PENDING', f"Setup failed: expected PENDING, got {row[0]}"
+    
+    # Case 2: COMPLETED key — should not be resolvable
+    audit.claim_idempotency_key("completed-key", ttl_seconds=300)
+    audit.commit_idempotency_key("completed-key", payment_link="https://rzp.io/l/test")
+    conn = sqlite3.connect(db)
+    row = conn.execute("SELECT status FROM idempotency_keys WHERE id='completed-key'").fetchone()
+    conn.close()
+    assert row[0] == 'COMPLETED', f"Setup failed: expected COMPLETED, got {row[0]}"
+    
+    # Case 3: NEEDS_RECONCILIATION key — SHOULD be resolvable
+    audit.claim_idempotency_key("recon-key", ttl_seconds=0)
+    import time
+    time.sleep(0.05)
+    audit.claim_idempotency_key("recon-key")  # triggers NEEDS_RECONCILIATION
+    conn = sqlite3.connect(db)
+    row = conn.execute("SELECT status FROM idempotency_keys WHERE id='recon-key'").fetchone()
+    conn.close()
+    assert row[0] == 'NEEDS_RECONCILIATION', f"Setup failed: expected NEEDS_RECONCILIATION, got {row[0]}"
+    
+    # Resolve the NEEDS_RECONCILIATION key — should work
+    audit.resolve_idempotency_key("recon-key", payment_link="https://rzp.io/l/resolved", failed=False)
+    conn = sqlite3.connect(db)
+    row = conn.execute("SELECT status, payment_link FROM idempotency_keys WHERE id='recon-key'").fetchone()
+    conn.close()
+    assert row[0] == 'RECONCILED_COMPLETED', f"Expected RECONCILED_COMPLETED, got {row[0]}"
+    assert row[1] == "https://rzp.io/l/resolved", f"Expected stored link, got {row[1]}"
+    
+    # Verify the ops_resolve.py script's guard logic: it checks status before calling resolve
+    # We test this by importing the script's logic directly
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ops_resolve", "ops_resolve.py")
+    ops = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ops)
+    
+    # Attempting to resolve the PENDING key should exit with error
+    import io, contextlib
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            ops.resolve_key(db, "pending-key", completed=False)
+        assert False, "Should have called sys.exit(1) for PENDING key"
+    except SystemExit as e:
+        assert e.code == 1, f"Expected exit code 1, got {e.code}"
+    
+    # Attempting to resolve the COMPLETED key should exit with error  
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            ops.resolve_key(db, "completed-key", completed=False)
+        assert False, "Should have called sys.exit(1) for COMPLETED key"
+    except SystemExit as e:
+        assert e.code == 1, f"Expected exit code 1, got {e.code}"
+    
+    os.remove(db)
 
 print("\n" + "="*60)
 print(f"RESULTS: {len(passes)} passed, {len(errors)} failed")

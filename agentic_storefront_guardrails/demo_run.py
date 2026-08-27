@@ -22,7 +22,7 @@ from agentic_storefront_guardrails.guardrails import ProductCatalog, ProductRule
 from agentic_storefront_guardrails.inventory_lock import InventoryManager
 from agentic_storefront_guardrails.audit_log import AuditLog
 from agentic_storefront_guardrails.payment_gate import (
-    PaymentGate, IdempotencyStore, demo_injection_attempt, flaky_razorpay_call,
+    PaymentGate, demo_injection_attempt, flaky_razorpay_call,
 )
 
 
@@ -38,7 +38,6 @@ def build_stack(db_path: str = "demo_audit_log.sqlite3", razorpay_fn=None):
     inventory.set_stock("SKU123", 2)  # matches the "Only 2 left!" scarcity copy
 
     audit = AuditLog(db_path=db_path)
-    idempotency = IdempotencyStore()
 
     # Each PaymentGate gets its OWN razorpay call function instance so
     # scenarios in this demo file don't share flaky-call state. In your
@@ -49,10 +48,9 @@ def build_stack(db_path: str = "demo_audit_log.sqlite3", razorpay_fn=None):
         price_guard=price_guard,
         inventory=inventory,
         audit=audit,
-        idempotency=idempotency,
         razorpay_create_link_fn=razorpay_fn or (lambda items, amt, cust=None: f"https://rzp.io/l/demo-{items[0].sku}-{int(amt)}"),
     )
-    return catalog, price_guard, inventory, audit, idempotency, gate
+    return catalog, price_guard, inventory, audit, gate
 
 
 def scenario_normal_deal(gate: PaymentGate, audit: AuditLog):
@@ -73,19 +71,19 @@ def scenario_injection_blocked(gate: PaymentGate, audit: AuditLog):
     print(result)
 
 
-def scenario_graceful_gateway_failure(price_guard, inventory, audit, idempotency):
+def scenario_graceful_gateway_failure(price_guard, inventory, audit):
     # A fresh gate + fresh flaky-call instance, purely so this scenario's
     # retry count isn't polluted by scenario 1 in this single demo run.
     def fresh_flaky_call():
         state = {"calls": 0}
-        def call(sku, amount):
+        def call(items, amount, customer=None):
             state["calls"] += 1
             if state["calls"] < 3:
                 raise ConnectionError("Simulated Razorpay gateway timeout")
-            return f"https://rzp.io/l/demo-{sku}-{int(amount)}"
+            return f"https://rzp.io/l/demo-{items[0].sku}-{int(amount)}"
         return call
 
-    gate = PaymentGate(price_guard, inventory, audit, idempotency,
+    gate = PaymentGate(price_guard, inventory, audit,
                         razorpay_create_link_fn=fresh_flaky_call())
     audit.log_turn("neg-002", 1, "buyer", "accept", proposed_price=9000)
     result = gate.finalize_deal("neg-002", [CheckoutItem(sku="SKU123", agreed_price=9000.0, quantity=1)], "idem-neg-002")
@@ -99,11 +97,11 @@ def print_audit_trail(audit: AuditLog, negotiation_id: str):
 
 
 if __name__ == "__main__":
-    catalog, price_guard, inventory, audit, idempotency, gate = build_stack()
+    catalog, price_guard, inventory, audit, gate = build_stack()
 
     scenario_normal_deal(gate, audit)
     scenario_injection_blocked(gate, audit)
-    scenario_graceful_gateway_failure(price_guard, inventory, audit, idempotency)
+    scenario_graceful_gateway_failure(price_guard, inventory, audit)
 
     print_audit_trail(audit, "neg-001")
     print_audit_trail(audit, "demo-injection-001")

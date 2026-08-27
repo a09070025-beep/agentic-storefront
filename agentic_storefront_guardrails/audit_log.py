@@ -176,7 +176,9 @@ class AuditLog:
           NEEDS_RECONCILIATION - stuck, waiting for ops
         """
         now = time.time()
-        with self._conn() as conn:
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT status, payment_link, expires_at FROM idempotency_keys WHERE id=?", (key,)).fetchone()
             if row:
                 status, link, expires_at = row
@@ -184,6 +186,7 @@ class AuditLog:
                 # Expired PENDING -> flag for ops reconciliation (idempotent: only writes once)
                 if status == 'PENDING' and now > expires_at:
                     conn.execute("UPDATE idempotency_keys SET status='NEEDS_RECONCILIATION' WHERE id=?", (key,))
+                    conn.commit()
                     return {'success': False, 'status': 'NEEDS_RECONCILIATION', 'payment_link': None, 'reason': 'Expired pending claim flagged for reconciliation'}
                 
                 # FAILED or RECONCILED_FAILED: safe to reclaim — delete old row, fall through to fresh insert
@@ -192,18 +195,25 @@ class AuditLog:
                     # Fall through to fresh insert below
                 else:
                     # PENDING (non-expired), COMPLETED, RECONCILED_COMPLETED, NEEDS_RECONCILIATION
+                    conn.rollback()
                     return {'success': False, 'status': status, 'payment_link': link, 'reason': 'Key already exists'}
             
-            try:
-                conn.execute("INSERT INTO idempotency_keys (id, status, payment_link, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
-                             (key, 'PENDING', None, now, now + ttl_seconds))
-                return {'success': True, 'status': 'PENDING', 'payment_link': None, 'reason': 'Claimed'}
-            except sqlite3.IntegrityError:
-                # Concurrent claim won the race — re-read and return current state
-                row = conn.execute("SELECT status, payment_link FROM idempotency_keys WHERE id=?", (key,)).fetchone()
-                if row:
-                    return {'success': False, 'status': row[0], 'payment_link': row[1], 'reason': 'Lost race to concurrent claim'}
-                return {'success': False, 'status': 'PENDING', 'payment_link': None, 'reason': 'Lost race to concurrent claim'}
+            conn.execute("INSERT INTO idempotency_keys (id, status, payment_link, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+                         (key, 'PENDING', None, now, now + ttl_seconds))
+            conn.commit()
+            return {'success': True, 'status': 'PENDING', 'payment_link': None, 'reason': 'Claimed'}
+        except sqlite3.IntegrityError:
+            conn.rollback()
+            # Concurrent claim won the race — re-read and return current state
+            row = conn.execute("SELECT status, payment_link FROM idempotency_keys WHERE id=?", (key,)).fetchone()
+            if row:
+                return {'success': False, 'status': row[0], 'payment_link': row[1], 'reason': 'Lost race to concurrent claim'}
+            return {'success': False, 'status': 'PENDING', 'payment_link': None, 'reason': 'Lost race to concurrent claim'}
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
             
     def commit_idempotency_key(self, key: str, payment_link: str = None, failed: bool = False):
         with self._conn() as conn:
