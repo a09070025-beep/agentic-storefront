@@ -3,8 +3,8 @@
 ## Framing A: Honest Upsell Comparison (Apples-to-Apples)
 - **Scenarios:** 26 (where budget >= list price)
 - **Methodology:** BOTH conditions must show conversion checked against the buyer's budget. Since budget >= list by construction, both convert 100%.
-- **Fixed-Price AOV:** Rs. 964.23
-- **Upsell Engine AOV:** Rs. 1,012.27
+- **Fixed-Price AOV:** Rs. 365.00
+- **Upsell Engine AOV:** Rs. 365.00
 - **AOV Uplift:** 0.00%
 
 ## Framing B: Negotiation Converts Budget-Constrained Buyers
