@@ -1,1 +1,0 @@
-import sys; import io; sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8'); from src.razorpay_service import RazorpayService; from config import get_settings; s = get_settings(); rzp = RazorpayService(settings=s); print(rzp.create_payment_link(amount=75000, description='test'))
