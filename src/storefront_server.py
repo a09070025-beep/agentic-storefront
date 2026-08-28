@@ -34,9 +34,11 @@ from src.razorpay_service import RazorpayService
 
 
 
-from agentic_storefront_guardrails.payment_gate import PaymentGate, 
+from agentic_storefront_guardrails.payment_gate import PaymentGate
 from agentic_storefront_guardrails.guardrails import PriceGuard, ProductCatalog, ProductRules
 from agentic_storefront_guardrails.schemas import CheckoutItem
+
+from agentic_storefront_guardrails.audit_log import AuditLog
 
 # ── Initialize components ─────────────────────────────────────────────
 settings = get_settings()

@@ -21,7 +21,7 @@ load_dotenv(_PROJECT_ROOT / ".env")
 # Groq / OSS Model — Single Source of Truth
 # ──────────────────────────────────────────────
 
-GROQ_MODEL_NAME = "openai/gpt-oss-20b"
+GROQ_MODEL_NAME = "openai/gpt-oss-120b"
 """The model name to use for all Groq/OSS API calls (Buyer AI, simulations, etc.)."""
 
 
@@ -194,3 +194,5 @@ if __name__ == "__main__":
         console.print("\n[yellow]⚠️  Razorpay keys not set — copy .env.example to .env and add your test keys[/yellow]")
 
     console.print("\n[bold green]✅ Config module loaded successfully[/bold green]\n")
+
+

@@ -86,18 +86,14 @@ def main():
             # The LLM determines if they accept.
             if response.accepted or (response.proposed_price and response.proposed_price >= bundle_price):
                 accept = True
-            elif bundle_price <= buyer.budget:
-                # If they didn't accept the FIRST offer, but the bundle price is <= budget,
-                # a rational merchant in the simulation would just accept the buyer's counter-offer (which is < budget),
-                # or eventually settle at some price <= budget.
-                # However, to be strict, we can just use the buyer's proposed price as the final agreed price!
-                accept = True
-                bundle_price = response.proposed_price if response.proposed_price else bundle_price
             else:
                 accept = False
                 
             if accept:
                 upsell_price = bundle_price
+            else:
+                bundle_price = list_price
+                upsell_price = list_price
                 
         total_fixed += fixed_price
         total_upsell += upsell_price

@@ -485,15 +485,16 @@ def test_ops_resolve_guard():
     
     os.remove(db)
 
-print("\n" + "="*60)
-print(f"RESULTS: {len(passes)} passed, {len(errors)} failed")
-print("="*60)
+if __name__ == "__main__":
+    print("\n" + "="*60)
+    print(f"RESULTS: {len(passes)} passed, {len(errors)} failed")
+    print("="*60)
 
-if errors:
-    print("\n[FAIL] FAILURES:")
-    for name, msg in errors:
-        print(f"  - {name}: {msg}")
-    sys.exit(1)
-else:
-    print("\n[PASS] ALL TESTS PASSED")
-    sys.exit(0)
+    if errors:
+        print("\n[FAIL] FAILURES:")
+        for name, msg in errors:
+            print(f"  - {name}: {msg}")
+        sys.exit(1)
+    else:
+        print("\n[PASS] ALL TESTS PASSED")
+        sys.exit(0)

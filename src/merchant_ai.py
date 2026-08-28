@@ -586,3 +586,4 @@ if __name__ == "__main__":
     except Exception as e:
         console.print(f"\n[bold red]❌ Error: {e}[/bold red]\n")
         raise
+
