@@ -92,7 +92,7 @@ This runs 41 deterministic guardrail tests covering price validation, inventory 
 
 ## Demo Scenarios — Guardrails in Action
 
-Run `python e2e_demo_verify.py` to execute all four scenarios automatically, or trigger them individually:
+Run `python e2e_demo_verify.py` to execute all five scenarios automatically, or trigger them individually:
 
 ### 1. Normal Deal
 A buyer negotiates a price above the cost floor. PriceGuard approves, InventoryManager reserves stock, PaymentGate creates a Razorpay order, AuditLog records the sale.
@@ -106,6 +106,9 @@ The Razorpay API call is simulated to fail on the first attempt. PaymentGate ret
 ### 4. Multi-Item Cart with Rollback
 A cart with two items passes price checks but hits a simulated payment failure. PaymentGate rolls back all inventory reservations atomically and logs the failure with full context.
 
+### 5. Idempotent Replay
+A simulated network partition causes the client to retry a completed deal with the same idempotency key. PaymentGate returns the exact same payment link without double-charging or double-reserving inventory.
+
 ---
 
 ## Results
@@ -115,7 +118,7 @@ Detailed per-scenario data: [`pitch_data_final.md`](pitch_data_final.md) and [`o
 | Metric | Value | What It Measures |
 |---|---|---|
 | **Framing B — Negotiation Conversion** | **83.3%** (10/12) | Buyers whose budget falls *between* the cost floor and list price — fixed pricing converts 0% of these (price too high), agentic negotiation converts 83.3% by finding a mutually acceptable price. |
-| **Framing A — Upsell AOV Uplift** | **0.00%** | Honest apples-to-apples comparison: when both conditions apply strict budget checks, the upsell engine does not yet produce statistically significant AOV uplift on the current catalog. |
+| **Framing A — Upsell AOV Uplift** | **0.00%** | Single, non-negotiated upsell offer to buyers already at their budget ceiling — every offer was rejected in this scope (0/26). Production's bundle-pivot logic can negotiate the upsell across multiple rounds; that path was not tested here. |
 
 Framing B is the core value proposition. Framing A confirms the upsell engine needs further iteration — we report it honestly rather than inflating it.
 
@@ -157,7 +160,7 @@ Framing B is the core value proposition. Framing A confirms the upsell engine ne
 ├── web_app.py                    # Web UI (FastAPI)
 ├── whatsapp_server.py            # WhatsApp bot (Twilio + FastAPI)
 ├── test_full_integration.py      # 41 guardrail integration tests
-├── e2e_demo_verify.py            # 4-scenario end-to-end demo verification
+├── e2e_demo_verify.py            # 5-scenario end-to-end demo verification
 └── config.py                     # Configuration + Razorpay client init
 ```
 
