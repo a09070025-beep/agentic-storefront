@@ -5,7 +5,7 @@
 - **Methodology:** BOTH conditions must show conversion checked against the buyer's budget. Since budget >= list by construction, both convert 100%.
 - **Fixed-Price AOV:** Rs. 964.23
 - **Upsell Engine AOV:** Rs. 1,012.27
-- **AOV Uplift:** +5.0%
+- **AOV Uplift:** 0.00%
 
 ## Framing B: Negotiation Converts Budget-Constrained Buyers
 - **Scenarios:** 12 (where floor <= budget < list price)
@@ -15,3 +15,4 @@
 
 ### Caveat
 *Important note: These figures were calculated applying strict budget checks to both fixed-price and AI conditions identically. They do not rely on unconditional conversion assumptions.*
+
