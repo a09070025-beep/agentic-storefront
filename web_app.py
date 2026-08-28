@@ -16,7 +16,7 @@ from x402_adapter import x402_router
 app = FastAPI(title="Agentic Storefront - Web UI")
 
 # Include the x402 protocol router
-app.include_router(x402_router)
+# app.include_router(x402_router)
 
 # Initialize shared resources
 settings = get_settings()
@@ -546,3 +546,4 @@ async def audit_trail_ui(negotiation_id: str):
     </html>
     """
     return HTMLResponse(content=html.replace("{neg_id}", negotiation_id))
+
