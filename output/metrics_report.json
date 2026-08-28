@@ -1,0 +1,390 @@
+{
+  "framing_a": [
+    {
+      "sku": "prod_001",
+      "name": "Ethiopian Yirgacheffe Light Roast",
+      "list_price": 45000,
+      "budget": 47200,
+      "fixed_price": 45000,
+      "upsell_price": 47200,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_002",
+      "name": "Colombian Supremo Dark Roast",
+      "list_price": 42000,
+      "budget": 44100,
+      "fixed_price": 42000,
+      "upsell_price": 44100,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_003",
+      "name": "Brazilian Santos Medium Roast",
+      "list_price": 38000,
+      "budget": 39900,
+      "fixed_price": 38000,
+      "upsell_price": 39900,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_004",
+      "name": "Sumatra Mandheling Dark Roast",
+      "list_price": 48000,
+      "budget": 50400,
+      "fixed_price": 48000,
+      "upsell_price": 50400,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_005",
+      "name": "Guatemala Antigua Medium Roast",
+      "list_price": 44000,
+      "budget": 46200,
+      "fixed_price": 44000,
+      "upsell_price": 46200,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_006",
+      "name": "Kenya AA Light Roast",
+      "list_price": 52000,
+      "budget": 54600,
+      "fixed_price": 52000,
+      "upsell_price": 54600,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_007",
+      "name": "Costa Rica Tarrazu Medium Roast",
+      "list_price": 46000,
+      "budget": 48300,
+      "fixed_price": 46000,
+      "upsell_price": 48300,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_008",
+      "name": "Decaf Swiss Water Process",
+      "list_price": 40000,
+      "budget": 42000,
+      "fixed_price": 40000,
+      "upsell_price": 42000,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_009",
+      "name": "Espresso Blend Dark Roast",
+      "list_price": 43000,
+      "budget": 45100,
+      "fixed_price": 43000,
+      "upsell_price": 45100,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_010",
+      "name": "Indian Malabar Monsoon",
+      "list_price": 35000,
+      "budget": 36700,
+      "fixed_price": 35000,
+      "upsell_price": 36700,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_011",
+      "name": "Rwanda Bourbon Light Roast",
+      "list_price": 50000,
+      "budget": 52500,
+      "fixed_price": 50000,
+      "upsell_price": 52500,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_012",
+      "name": "House Blend Medium Roast",
+      "list_price": 32000,
+      "budget": 33600,
+      "fixed_price": 32000,
+      "upsell_price": 33600,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_022",
+      "name": "AeroPress Original",
+      "list_price": 350000,
+      "budget": 367500,
+      "fixed_price": 350000,
+      "upsell_price": 367500,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_025",
+      "name": "Chemex Classic 6-Cup",
+      "list_price": 280000,
+      "budget": 294000,
+      "fixed_price": 280000,
+      "upsell_price": 294000,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_026",
+      "name": "Turkish Coffee Pot (Cezve)",
+      "list_price": 55000,
+      "budget": 57700,
+      "fixed_price": 55000,
+      "upsell_price": 57700,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_027",
+      "name": "Siphon Coffee Brewer",
+      "list_price": 450000,
+      "budget": 472500,
+      "fixed_price": 450000,
+      "upsell_price": 472500,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_028",
+      "name": "Electric Gooseneck Kettle 1L",
+      "list_price": 280000,
+      "budget": 294000,
+      "fixed_price": 280000,
+      "upsell_price": 294000,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_029",
+      "name": "Drip Coffee Maker 12-Cup",
+      "list_price": 350000,
+      "budget": 367500,
+      "fixed_price": 350000,
+      "upsell_price": 367500,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_040",
+      "name": "Hario V60 Paper Filters (100pk)",
+      "list_price": 15000,
+      "budget": 15700,
+      "fixed_price": 15000,
+      "upsell_price": 15700,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_043",
+      "name": "Coffee Canister Airtight 500g",
+      "list_price": 45000,
+      "budget": 47200,
+      "fixed_price": 45000,
+      "upsell_price": 47200,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_044",
+      "name": "Milk Frother Handheld",
+      "list_price": 25000,
+      "budget": 26200,
+      "fixed_price": 25000,
+      "upsell_price": 26200,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_045",
+      "name": "Coffee Thermometer",
+      "list_price": 12000,
+      "budget": 12600,
+      "fixed_price": 12000,
+      "upsell_price": 12600,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_046",
+      "name": "Chemex Paper Filters (100pk)",
+      "list_price": 22000,
+      "budget": 23100,
+      "fixed_price": 22000,
+      "upsell_price": 23100,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_047",
+      "name": "Knock Box Espresso",
+      "list_price": 35000,
+      "budget": 36700,
+      "fixed_price": 35000,
+      "upsell_price": 36700,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_048",
+      "name": "Reusable Metal Filter V60",
+      "list_price": 55000,
+      "budget": 57700,
+      "fixed_price": 55000,
+      "upsell_price": 57700,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    },
+    {
+      "sku": "prod_049",
+      "name": "AeroPress Filter Pack (350pk)",
+      "list_price": 18000,
+      "budget": 18900,
+      "fixed_price": 18000,
+      "upsell_price": 18900,
+      "fixed_outcome": "success",
+      "upsell_outcome": "success"
+    }
+  ],
+  "framing_b": [
+    {
+      "sku": "prod_024",
+      "name": "Cold Brew Mason Jar Kit",
+      "list_price": 65000,
+      "floor_price": 42250,
+      "budget": 53600,
+      "outcome": "success",
+      "final_price": 53600,
+      "fixed_price_outcome": "walk"
+    },
+    {
+      "sku": "prod_063",
+      "name": "Espresso Cup Set (4 pcs)",
+      "list_price": 65000,
+      "floor_price": 29250,
+      "budget": 47100,
+      "outcome": "success",
+      "final_price": 47100,
+      "fixed_price_outcome": "walk"
+    },
+    {
+      "sku": "prod_062",
+      "name": "Travel Tumbler 500ml",
+      "list_price": 75000,
+      "floor_price": 33750,
+      "budget": 54300,
+      "outcome": "success",
+      "final_price": 54300,
+      "fixed_price_outcome": "walk"
+    },
+    {
+      "sku": "prod_023",
+      "name": "Moka Pot 3-Cup Stovetop",
+      "list_price": 85000,
+      "floor_price": 55250,
+      "budget": 70100,
+      "outcome": "success",
+      "final_price": 70100,
+      "fixed_price_outcome": "walk"
+    },
+    {
+      "sku": "prod_021",
+      "name": "French Press 800ml",
+      "list_price": 95000,
+      "floor_price": 61750,
+      "budget": 78300,
+      "outcome": "success",
+      "final_price": 78300,
+      "fixed_price_outcome": "walk"
+    },
+    {
+      "sku": "prod_042",
+      "name": "Digital Coffee Scale 0.1g",
+      "list_price": 95000,
+      "floor_price": 47500,
+      "budget": 71200,
+      "outcome": "success",
+      "final_price": 71200,
+      "fixed_price_outcome": "walk"
+    },
+    {
+      "sku": "prod_020",
+      "name": "Hario V60 Pour Over Dripper",
+      "list_price": 120000,
+      "floor_price": 78000,
+      "budget": 99000,
+      "outcome": "success",
+      "final_price": 99000,
+      "fixed_price_outcome": "walk"
+    },
+    {
+      "sku": "prod_101",
+      "name": "Insulated Travel Mug 480ml",
+      "list_price": 120000,
+      "floor_price": 72000,
+      "budget": 96000,
+      "outcome": "success",
+      "final_price": 96000,
+      "fixed_price_outcome": "walk"
+    },
+    {
+      "sku": "prod_084",
+      "name": "Cold Brew Summer Pack",
+      "list_price": 160000,
+      "floor_price": 96000,
+      "budget": 128000,
+      "outcome": "success",
+      "final_price": 128000,
+      "fixed_price_outcome": "walk"
+    },
+    {
+      "sku": "prod_041",
+      "name": "Burr Coffee Grinder Manual",
+      "list_price": 180000,
+      "floor_price": 90000,
+      "budget": 135000,
+      "outcome": "success",
+      "final_price": 135000,
+      "fixed_price_outcome": "walk"
+    },
+    {
+      "sku": "prod_081",
+      "name": "Premium Single Origin Sampler",
+      "list_price": 180000,
+      "floor_price": 108000,
+      "budget": 144000,
+      "outcome": "walk",
+      "final_price": 180000,
+      "fixed_price_outcome": "walk"
+    },
+    {
+      "sku": "prod_103",
+      "name": "Specialty Cold Brew Kit",
+      "list_price": 180000,
+      "floor_price": 108000,
+      "budget": 144000,
+      "outcome": "walk",
+      "final_price": 180000,
+      "fixed_price_outcome": "walk"
+    }
+  ],
+  "summary": {
+    "framing_a_uplift_pct": 5.0,
+    "framing_b_conversion_pct": 83.3
+  }
+}
