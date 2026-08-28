@@ -55,6 +55,13 @@ class UpsellEngine:
         product_id_set = set(product_ids)
         recommendations: list[Recommendation] = []
         seen_product_ids: set[str] = set(product_ids)  # don't recommend what's already selected
+        
+        # Calculate base cart value to ensure we don't recommend items that are wildly more expensive
+        base_cart_value = sum(
+            self.catalog.get_product(pid).price 
+            for pid in product_ids 
+            if self.catalog.get_product(pid)
+        )
 
         for rule in self._rules:
             # Check if any trigger product is in the selected set
@@ -73,6 +80,11 @@ class UpsellEngine:
 
                 product = self.catalog.get_product(rec_id)
                 if not product or not product.active or product.stock <= 0:
+                    continue
+                    
+                # Core fix: Upsell should be price-appropriate. Don't recommend an item 
+                # that costs more than the base cart value itself.
+                if product.price > base_cart_value:
                     continue
 
                 # Calculate potential savings
