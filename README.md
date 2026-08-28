@@ -4,6 +4,27 @@
 
 Built for the **Razorpay AI Buildathon** — Agentic Payments track.
 
+## Contents
+- [Architecture Overview](#architecture-overview)
+- [Setup](#setup)
+- [Running Tests](#running-tests)
+- [Demo Scenarios — Guardrails in Action](#demo-scenarios--guardrails-in-action)
+- [Results](#results)
+- [Known Limitations](#known-limitations)
+- [Project Structure](#project-structure)
+- [License](#license)
+
+## Quickstart
+```bash
+python -m venv .venv
+.venv\Scripts\activate  # Mac/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env    # Windows cmd: copy .env.example .env
+# Fill in your keys in .env, then:
+python web_app.py
+```
+Full setup, environment variable details, and other run modes (WhatsApp, MCP server) are in [Setup](#setup) below.
+
 ---
 
 ## Architecture Overview
