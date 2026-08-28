@@ -158,7 +158,7 @@ class AuditLog:
                 (str(uuid.uuid4()), action_str, actor, json.dumps(details) if details else None, amount, reason, time.time())
             )
 
-    def claim_idempotency_key(self, key: str, ttl_seconds: int = 60) -> dict:
+    def claim_idempotency_key(self, key: str, ttl_seconds: int = 300) -> dict:
         """
         Two-phase idempotency claim. Status state machine:
         
@@ -215,10 +215,24 @@ class AuditLog:
         finally:
             conn.close()
             
-    def commit_idempotency_key(self, key: str, payment_link: str = None, failed: bool = False):
+    def commit_idempotency_key(self, key: str, payment_link: str = None, failed: bool = False) -> bool:
+        """Transition PENDING -> COMPLETED|FAILED. Returns False if row is no longer PENDING
+        (e.g., TTL expired and it's now NEEDS_RECONCILIATION). Caller should not
+        treat a False return as an error — it means the link was created but
+        reconciliation is already in flight."""
+        new_status = 'FAILED' if failed else 'COMPLETED'
         with self._conn() as conn:
-            status = 'FAILED' if failed else 'COMPLETED'
-            conn.execute("UPDATE idempotency_keys SET status=?, payment_link=? WHERE id=?", (status, payment_link, key))
+            row = conn.execute("SELECT status FROM idempotency_keys WHERE id=?", (key,)).fetchone()
+            if not row:
+                return False
+            current_status = row[0]
+            if current_status != 'PENDING':
+                # Row already transitioned (TTL expiry -> NEEDS_RECONCILIATION, or ops resolved)
+                # Do NOT overwrite — leave it for ops to handle
+                return False
+            conn.execute("UPDATE idempotency_keys SET status=?, payment_link=? WHERE id=?",
+                         (new_status, payment_link, key))
+            return True
             
     def resolve_idempotency_key(self, key: str, payment_link: str = None, failed: bool = False):
         with self._conn() as conn:

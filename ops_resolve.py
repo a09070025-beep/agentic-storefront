@@ -24,24 +24,49 @@ DB_PATH = "data/pg_audit.sqlite3"
 def list_flagged(db_path: str):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    rows = conn.execute(
+    
+    # 1. Already-flagged NEEDS_RECONCILIATION rows
+    recon_rows = conn.execute(
         "SELECT id, status, payment_link, created_at, expires_at "
         "FROM idempotency_keys WHERE status = 'NEEDS_RECONCILIATION' "
         "ORDER BY created_at"
     ).fetchall()
+    
+    # 2. Orphaned PENDING rows past their TTL (no retry ever triggered the lazy check)
+    now = time.time()
+    orphaned_rows = conn.execute(
+        "SELECT id, status, payment_link, created_at, expires_at "
+        "FROM idempotency_keys WHERE status = 'PENDING' AND expires_at < ? "
+        "ORDER BY created_at", (now,)
+    ).fetchall()
+    
     conn.close()
 
-    if not rows:
-        print("No flagged keys found.")
+    if not recon_rows and not orphaned_rows:
+        print("No flagged or orphaned keys found.")
         return
 
-    print(f"\n{'Key':<40} {'Created':<26} {'Expired':<26}")
-    print("-" * 92)
-    for r in rows:
-        created = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r['created_at']))
-        expired = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r['expires_at']))
-        print(f"{r['id']:<40} {created:<26} {expired:<26}")
-    print(f"\n{len(rows)} key(s) awaiting resolution.")
+    if recon_rows:
+        print(f"\n--- NEEDS_RECONCILIATION ({len(recon_rows)}) ---")
+        print(f"{'Key':<40} {'Created':<26} {'Expired':<26}")
+        print("-" * 92)
+        for r in recon_rows:
+            created = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r['created_at']))
+            expired = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r['expires_at']))
+            print(f"{r['id']:<40} {created:<26} {expired:<26}")
+
+    if orphaned_rows:
+        print(f"\n--- ORPHANED PENDING (expired, never retried) ({len(orphaned_rows)}) ---")
+        print(f"{'Key':<40} {'Created':<26} {'Expired':<26}")
+        print("-" * 92)
+        for r in orphaned_rows:
+            created = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r['created_at']))
+            expired = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r['expires_at']))
+            print(f"{r['id']:<40} {created:<26} {expired:<26}")
+        print("  (Use 'resolve' on these keys -- they will be auto-transitioned to NEEDS_RECONCILIATION first)")
+
+    total = len(recon_rows) + len(orphaned_rows)
+    print(f"\n{total} key(s) requiring attention.")
 
 
 def resolve_key(db_path: str, key: str, completed: bool, payment_link: str = None):
@@ -56,8 +81,25 @@ def resolve_key(db_path: str, key: str, completed: bool, payment_link: str = Non
     if not row:
         print(f"ERROR: Key '{key}' not found.")
         sys.exit(1)
-    if row[0] != 'NEEDS_RECONCILIATION':
-        print(f"ERROR: Key '{key}' is in status '{row[0]}', not NEEDS_RECONCILIATION. Cannot resolve.")
+    
+    current_status = row[0]
+    if current_status == 'PENDING':
+        # Check if it's expired — if so, auto-transition to NEEDS_RECONCILIATION
+        conn2 = sqlite3.connect(db_path)
+        row2 = conn2.execute("SELECT expires_at FROM idempotency_keys WHERE id=?", (key,)).fetchone()
+        conn2.close()
+        if row2 and time.time() > row2[0]:
+            print(f"NOTE: Key '{key}' is orphaned PENDING (expired). Auto-transitioning to NEEDS_RECONCILIATION.")
+            conn3 = sqlite3.connect(db_path)
+            conn3.execute("UPDATE idempotency_keys SET status='NEEDS_RECONCILIATION' WHERE id=?", (key,))
+            conn3.commit()
+            conn3.close()
+            current_status = 'NEEDS_RECONCILIATION'
+        else:
+            print(f"ERROR: Key '{key}' is PENDING and not yet expired. Cannot resolve an in-flight request.")
+            sys.exit(1)
+    elif current_status != 'NEEDS_RECONCILIATION':
+        print(f"ERROR: Key '{key}' is in status '{current_status}', not NEEDS_RECONCILIATION. Cannot resolve.")
         sys.exit(1)
 
     if completed:

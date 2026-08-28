@@ -341,6 +341,40 @@ def test_idem_ttl_paymentgate():
     
     os.remove(db)
 
+@test("commit() refuses to overwrite NEEDS_RECONCILIATION (slow-success race)")
+def test_idem_commit_refuses_overwrite():
+    from agentic_storefront_guardrails.audit_log import AuditLog
+    import tempfile, os, sqlite3
+    
+    db = os.path.join(tempfile.gettempdir(), "test_idem_overwrite.sqlite3")
+    if os.path.exists(db):
+        os.remove(db)
+    audit = AuditLog(db_path=db)
+    
+    # 1. Claim with TTL=0 so it expires immediately
+    r1 = audit.claim_idempotency_key("slow-key", ttl_seconds=0)
+    assert r1['success'] == True
+    
+    import time
+    time.sleep(0.05)
+    
+    # 2. A retry (or anything) calls claim() and flips it to NEEDS_RECONCILIATION
+    r2 = audit.claim_idempotency_key("slow-key")
+    assert r2['status'] == 'NEEDS_RECONCILIATION'
+    
+    # 3. The original slow request's Razorpay call succeeds and tries to commit
+    committed = audit.commit_idempotency_key("slow-key", payment_link="https://rzp.io/l/slow-but-ok")
+    assert committed == False, "commit() should have refused to overwrite NEEDS_RECONCILIATION"
+    
+    # 4. Verify the row is still NEEDS_RECONCILIATION, not silently overwritten
+    conn = sqlite3.connect(db)
+    row = conn.execute("SELECT status, payment_link FROM idempotency_keys WHERE id='slow-key'").fetchone()
+    conn.close()
+    assert row[0] == 'NEEDS_RECONCILIATION', f"Expected NEEDS_RECONCILIATION, got {row[0]}"
+    assert row[1] is None, f"Payment link should NOT have been stored: {row[1]}"
+    
+    os.remove(db)
+
 @test("Concurrent reclaim on FAILED key: exactly one thread wins, loser gets rejection")
 def test_idem_concurrent_reclaim():
     from agentic_storefront_guardrails.audit_log import AuditLog
