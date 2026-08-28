@@ -32,7 +32,8 @@ class AgenticBuyer:
     (not via MCP transport) for reliable batch testing.
     """
 
-    def __init__(self, use_razorpay: bool = False, verbose: bool = True):
+    def __init__(self, use_razorpay: bool = False, verbose: bool = True,
+                 fixed_price_mode: bool = False, buyer_budget: int = 55000):
         self.settings = get_settings()
         self.audit = AuditLog("data/pg_audit.sqlite3")
         self.audit.clear()
@@ -44,6 +45,8 @@ class AgenticBuyer:
         self.rzp_service = None
         self.use_razorpay = use_razorpay
         self.verbose = verbose
+        self.fixed_price_mode = fixed_price_mode
+        self.buyer_budget = buyer_budget  # paise
         self.console = Console(force_terminal=True)
 
         if use_razorpay:
@@ -102,37 +105,48 @@ class AgenticBuyer:
 
             result.cart_value_without_upsell = base_value
 
-            # Step 3: Get recommendations
-            product_ids = [item["product_id"] for item in items]
-            recs = self.upsell.get_recommendations(product_ids)
-
-            self.audit.log(
-                AuditAction.UPSELL_OFFERED, actor="system",
-                details={"products": product_ids, "recommendations": len(recs)},
-                reason=f"[{scenario.id}] Offered {len(recs)} recommendations"
-            )
-
-            # Step 4: Accept or decline upsell
-            upsell_value = 0
-            if scenario.accept_upsell and recs:
-                # Accept first recommendation
-                rec = recs[0]
-                items.append({"product_id": rec.product.id, "quantity": 1})
-                upsell_value = rec.product.price
+            # ── Fixed-price mode: no upsell, walk away if over budget ──
+            if self.fixed_price_mode:
+                if base_value > self.buyer_budget:
+                    result.outcome = "walk_away"
+                    result.cart_value_with_upsell = 0
+                    result.error_message = f"Over budget: Rs.{base_value/100:.0f} > Rs.{self.buyer_budget/100:.0f}"
+                    return result
+                # Within budget: buy at list price, no upsell
+                result.cart_value_with_upsell = base_value
+            else:
+                # ── Negotiation mode: offer upsell recommendations ──
+                # Step 3: Get recommendations
+                product_ids = [item["product_id"] for item in items]
+                recs = self.upsell.get_recommendations(product_ids)
 
                 self.audit.log(
-                    AuditAction.UPSELL_ACCEPTED, actor="buyer_agent",
-                    details={"product": rec.product.name, "savings": rec.potential_savings},
-                    reason=f"[{scenario.id}] Accepted upsell: {rec.product.name}"
-                )
-            elif recs:
-                self.audit.log(
-                    AuditAction.UPSELL_DECLINED, actor="buyer_agent",
-                    details={"recommendations_declined": len(recs)},
-                    reason=f"[{scenario.id}] Declined {len(recs)} recommendations"
+                    AuditAction.UPSELL_OFFERED, actor="system",
+                    details={"products": product_ids, "recommendations": len(recs)},
+                    reason=f"[{scenario.id}] Offered {len(recs)} recommendations"
                 )
 
-            result.cart_value_with_upsell = base_value + upsell_value
+                # Step 4: Accept or decline upsell
+                upsell_value = 0
+                if scenario.accept_upsell and recs:
+                    # Accept first recommendation
+                    rec = recs[0]
+                    items.append({"product_id": rec.product.id, "quantity": 1})
+                    upsell_value = rec.product.price
+
+                    self.audit.log(
+                        AuditAction.UPSELL_ACCEPTED, actor="buyer_agent",
+                        details={"product": rec.product.name, "savings": rec.potential_savings},
+                        reason=f"[{scenario.id}] Accepted upsell: {rec.product.name}"
+                    )
+                elif recs:
+                    self.audit.log(
+                        AuditAction.UPSELL_DECLINED, actor="buyer_agent",
+                        details={"recommendations_declined": len(recs)},
+                        reason=f"[{scenario.id}] Declined {len(recs)} recommendations"
+                    )
+
+                result.cart_value_with_upsell = base_value + upsell_value
 
             # Step 5: Create cart
             cart = self.cart_mgr.create_cart(items)
