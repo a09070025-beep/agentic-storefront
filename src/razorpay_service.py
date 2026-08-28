@@ -68,7 +68,7 @@ class RazorpayService:
             self.audit.log(
                 AuditAction.BOUNDS_CHECK, actor="system",
                 details={"amount": amount, "max": self.settings.max_order_amount},
-                amount=amount, status="rejected",
+                amount=amount, details_status="rejected",
                 reason=f"Order amount Rs.{amount/100:.2f} exceeds max Rs.{self.settings.max_order_amount/100:.2f}"
             )
             raise ValueError(
@@ -98,6 +98,7 @@ class RazorpayService:
                 "receipt": receipt,
             },
             amount=order["amount"],
+            details_status="success",
             reason=f"Razorpay order {order['id']} created for Rs.{order['amount']/100:.2f}"
         )
 
@@ -192,8 +193,7 @@ class RazorpayService:
             # Order is still valid — log and continue
             self.audit.log(
                 AuditAction.ERROR, actor="system",
-                details={"order_id": order["id"], "error": str(e)},
-                status="failed",
+                details={"order_id": order["id"], "status": "failed", "error": str(e)},
                 reason=f"Payment link skipped (test mode limit): order {order['id']} still valid"
             )
 
@@ -203,7 +203,7 @@ class RazorpayService:
             payment_link_url=plink_url,
             amount=order["amount"],
             currency=order["currency"],
-            status=order["status"],
+            details_status=order["status"],
             cart_id=receipt,
             receipt=receipt,
         )
@@ -217,7 +217,7 @@ class RazorpayService:
 
         return PaymentStatus(
             order_id=order["id"],
-            status=order["status"],
+            details_status=order["status"],
             amount=order["amount"],
             amount_paid=order.get("amount_paid", 0),
             currency=order.get("currency", "INR"),
