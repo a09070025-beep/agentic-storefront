@@ -36,11 +36,18 @@ class AgenticBuyer:
                  fixed_price_mode: bool = False, buyer_budget: int = 55000):
         self.settings = get_settings()
         self.audit = AuditLog("data/pg_audit.sqlite3")
-        self.audit.clear()
         self.catalog = CatalogStore(catalog_path=self.settings.catalog_path)
         self.upsell = UpsellEngine(self.catalog, rules_path=self.settings.bundle_rules_path)
+        from agentic_storefront_guardrails.payment_gate import PaymentGate
+        from agentic_storefront_guardrails.guardrails import PriceGuard, ProductCatalog
+        self.payment_gate = PaymentGate(
+            price_guard=PriceGuard(ProductCatalog()),
+            inventory=self.catalog.inventory,
+            audit=self.audit,
+            razorpay_create_link_fn=lambda amount, ref, desc, cust: "https://rzp.io/mock",
+        )
         self.cart_mgr = CartManager(
-            self.catalog, self.upsell, self.audit, self.settings,
+            self.catalog, self.upsell, self.audit, self.payment_gate,
         )
         self.rzp_service = None
         self.use_razorpay = use_razorpay
@@ -218,7 +225,6 @@ class AgenticBuyer:
             result.outcome = "failed_unexpected"
             result.error_message = str(e)
 
-        result.audit_entry_count = self.audit.entry_count
         return result
 
     def run_batch(self, scenarios: list[PurchaseScenario] | None = None) -> BatchResult:
@@ -244,8 +250,9 @@ class AgenticBuyer:
                 # Reload catalog for each scenario to reset stock
                 self.catalog = CatalogStore(catalog_path=self.settings.catalog_path)
                 self.upsell = UpsellEngine(self.catalog, rules_path=self.settings.bundle_rules_path)
+                self.payment_gate.inventory = self.catalog.inventory
                 self.cart_mgr = CartManager(
-                    self.catalog, self.upsell, self.audit, self.settings,
+                    self.catalog, self.upsell, self.audit, self.payment_gate,
                 )
 
                 result = self.run_scenario(scenario)
@@ -329,7 +336,6 @@ class AgenticBuyer:
         summary.add_row("Total GMV", f"Rs.{batch.total_gmv/100:,.2f}")
         summary.add_row("Conversion Rate", f"{batch.conversion_rate:.1f}%")
         summary.add_row("Upsell Acceptance Rate", f"{batch.upsell_acceptance_rate:.1f}%")
-        summary.add_row("Audit Trail Entries", str(self.audit.entry_count))
 
         self.console.print(summary)
 

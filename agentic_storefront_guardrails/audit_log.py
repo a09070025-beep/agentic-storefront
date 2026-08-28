@@ -148,8 +148,11 @@ class AuditLog:
                  amount, status, detail, time.time()),
             )
 
-    def log(self, action: str, actor: str, details: dict = None, amount: float = None, reason: str = None):
+    def log(self, action: str, actor: str, details: dict = None, amount: float = None, reason: str = None, **kwargs):
         """Unified with the old JSONL AuditLogger."""
+        details = details or {}
+        if kwargs:
+            details.update(kwargs)
         with self._conn() as conn:
             # handle ENUMs like AuditAction.xxx by converting to str
             action_str = str(action.value) if hasattr(action, 'value') else str(action)
